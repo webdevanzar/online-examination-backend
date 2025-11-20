@@ -1,0 +1,53 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "main": "index.js",
+  "type": "commonjs",
+  "scripts": {
+    "watch": "tsc -w",
+    "seed:admin": "ts-node src/seeds/createDefaultAdmin.ts",
+    "dev": "nodemon --exec ts-node src/index.ts",
+    "swagger": "node swaggerdoc/swagger-server.js",
+    "dev:with-swagger": "concurrently \"npm run dev\" \"npm run swagger\"",
+    "start:dev": "concurrently \"tsc -w\" \"nodemon build/index.js\"",
+    "build": "tsc",
+    "start": "node build/index.js",
+    "typeorm": "typeorm-ts-node-commonjs",
+    "migration": "npm run typeorm migration:run -- -d ./src/data-source.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "devDependencies": {
+    "@types/multer": "^2.0.0",
+    "@types/node": "^22.13.10",
+    "swagger-ui-express": "^5.0.1",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.2"
+  },
+  "dependencies": {
+    "@types/bcrypt": "^6.0.0",
+    "@types/express": "^5.0.3",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/memory-cache": "^0.2.6",
+    "bcrypt": "^6.0.0",
+    "cloudinary": "^2.7.0",
+    "concurrently": "^9.2.0",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.1",
+    "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "memory-cache": "^0.2.0",
+    "multer": "^2.0.2",
+    "node-cron": "^4.2.1",
+    "nodemailer": "^7.0.5",
+    "pg": "^8.14.1",
+    "qrcode": "^1.5.4",
+    "reflect-metadata": "^0.2.2",
+    "typeorm": "0.3.26",
+    "xlsx": "^0.18.5",
+    "zod": "^4.0.17"
+  }
+}
