@@ -1,25 +1,16 @@
 import "reflect-metadata";
 import { DataSource } from "typeorm";
 import dotenv from "dotenv";
-
-import { User } from "./entity/auth/User.entity";
-import { Auth } from "./entity/auth/Auth.entity";
-import { Lead } from "./entity/leads/Lead.entity";
-import { LeadHistory } from "./entity/leads/LeadHistory.entity";
-import { Attendance } from "./entity/attendance/Attendance.entity";
-import { Holiday } from "./entity/attendance/Holidays.entity";
-import { Leave } from "./entity/attendance/Leave.entity";
-import { Notification } from "./entity/notification/Notification.entity";
-import { NotificationProfile } from "./entity/notification/NotificationProfile.entity";
-import { Token } from "./entity/common/Token.entity";
-import { Client } from "./entity/projectmanagement/client.entity";
-import { ProjectTeam } from "./entity/projectmanagement/projectTeam.entity";
-import { Project } from "./entity/projectmanagement/project.entity";
-import { Task } from "./entity/projectmanagement/task.entity";
-import { TaskComment } from "./entity/projectmanagement/taskComment.entity";
-import { TaskTimeLog } from "./entity/projectmanagement/taskTimeLog.entity";
-import { Attachment } from "./entity/projectmanagement/attachment.entity";
-import { TaskHistory } from "./entity/projectmanagement/taskHistory.entity";
+import { Exam } from "./entity/Exam.entity";
+import { Question } from "./entity/Question.entity";
+import { Option } from "./entity/Option.entity";
+import { ExamAttempt } from "./entity/ExamAttempt.entity";
+import { CheatEvent } from "./entity/CheatEvent.entity";
+import { Student } from "./entity/Student.entity";
+import { Admin } from "./entity/Admin.entity";
+import { Answer } from "./entity/Answer.entity";
+import { NotificationProfile } from "./entity/NotificationProfile.entity";
+import { Notification } from "./entity/Notification.entitty";
 
 dotenv.config();
 
@@ -36,24 +27,16 @@ export const AppDataSource = new DataSource({
   synchronize: true, // auto create tables in dev
   // logging: NODE_ENV === "dev" /*Eable logging to see the SQL queries*/,
   entities: [
-    Auth,
-    User,
-    Lead,
-    LeadHistory,
-    Token,
-    Attendance,
-    Holiday,
-    Leave,
-    Notification,
+    Exam,
+    Question,
+    Option,
+    ExamAttempt,
+    CheatEvent,
+    Student,
+    Admin,
+    Answer,
     NotificationProfile,
-    Client,
-    Project,
-    ProjectTeam,
-    Task,
-    TaskComment,
-    TaskHistory,
-    TaskTimeLog,
-    Attachment,
+    Notification,
   ],
   migrations: ["src/migrations/*.ts"],
   subscribers: [],

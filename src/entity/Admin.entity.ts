@@ -18,10 +18,10 @@ export class Admin extends BaseEntity {
   @Column({ unique: true, length: 200 })
   email!: string;
 
-  @Column({ select: false })
+  @Column('text')
   password!: string;
 
-  @Column({ nullable: true })
+  @Column({ nullable: true }) 
   profileImage!: string;
 
   @Column({ nullable: true })

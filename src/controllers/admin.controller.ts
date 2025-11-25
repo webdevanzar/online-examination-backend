@@ -6,7 +6,6 @@ import {
   CreateQuestionSchema,
   LoginSchema,
   LoginSchemaType,
-  RegisterSchema,
   UpdateExamSchema,
   UpdateQuestionSchema,
 } from "../zodschemas";
@@ -19,6 +18,8 @@ import { hashPassword } from "../utils/hashPassword";
 import { Exam } from "../entity/Exam.entity";
 import { Option } from "../entity/Option.entity";
 import { Question, QuestionType } from "../entity/Question.entity";
+import { ExamAttempt } from "../entity/ExamAttempt.entity";
+import { CheatEvent } from "../entity/CheatEvent.entity";
 
 export const adminLogin = async (
   req: Request,
@@ -29,7 +30,7 @@ export const adminLogin = async (
     // Validate request body
     const parsedResult = LoginSchema.safeParse(req.body);
     if (!parsedResult.success) {
-      next(parsedResult.error);
+     return next(parsedResult.error);
     }
 
     const { email, password, rememberMe } =
@@ -43,6 +44,7 @@ export const adminLogin = async (
     if (!admin) {
       throw new AppError("Invalid credentials", 403);
     }
+
 
     // Compare password
     const isValid = await bcrypt.compare(password, admin.password);
@@ -203,6 +205,25 @@ export const createExam = async (
     });
   } catch (error) {
     next(error);
+  }
+};
+
+export const getExamQuestions = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const examId = req.params.id;
+
+    const questions = await Question.find({
+      where: { exam: { id: examId } },
+      relations: ["options"],
+    });
+
+    return res.json({ questions });
+  } catch (err) {
+    next(err);
   }
 };
 
@@ -398,6 +419,57 @@ export const deleteQuestion = async (
     await question.remove();
 
     res.json({ message: "Question deleted successfully" });
+  } catch (err) {
+    next(err);
+  }
+};
+
+//terminate attempt
+export const terminateAttempt = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const attempt = await ExamAttempt.findOne({
+      where: { id: req.params.attemptId },
+    });
+
+    if (!attempt) throw new AppError("Attempt not found", 404);
+
+    attempt.isSubmitted = true;
+    attempt.submittedAt = new Date();
+
+    await attempt.save();
+
+    return res.json({ message: "Attempt terminated" });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const logCheatEvent = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { attemptId } = req.params;
+    const { eventType, confidence, screenshot } = req.body;
+
+    const attempt = await ExamAttempt.findOne({ where: { id: attemptId } });
+    if (!attempt) throw new AppError("Attempt not found", 404);
+
+    const evt = CheatEvent.create({
+      attempt,
+      eventType,
+      confidence,
+      screenshot,
+    });
+
+    await evt.save();
+
+    return res.json({ message: "Event logged" });
   } catch (err) {
     next(err);
   }

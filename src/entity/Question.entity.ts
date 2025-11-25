@@ -37,7 +37,6 @@ export class Question extends BaseEntity {
   @Column({ type: "float", default: 1 })
   marks!: number;
 
-  // ---------- MCQ ONLY ----------
   @Column({ type: "boolean", default: false })
   hasMultipleCorrect!: boolean; // true = multiple answers possible
 
