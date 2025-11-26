@@ -29,7 +29,7 @@ export const studentLogin = async (
     // Validate request body
     const parsedResult = LoginSchema.safeParse(req.body);
     if (!parsedResult.success) {
-      next(parsedResult.error);
+      return next(parsedResult.error);
     }
 
     const { email, password, rememberMe } =
@@ -41,13 +41,13 @@ export const studentLogin = async (
     });
 
     if (!student) {
-      throw new AppError("Invalid credentials", 403);
+      throw new AppError("Invalid credentials", 401);
     }
 
     // Compare password
     const isValid = await bcrypt.compare(password, student.password);
     if (!isValid) {
-      throw new AppError("Invalid credentials (password)", 403);
+      throw new AppError("Invalid credentials", 401);
     }
 
     //notification count
@@ -141,7 +141,7 @@ export const studentRegister = async (
     console.log("Registering user...");
     const parsedResult = RegisterSchema.safeParse(req.body);
     if (!parsedResult.success) {
-      next(parsedResult.error);
+      return next(parsedResult.error);
     }
     const { email, password, fullName, phoneNumber, gender, dob } =
       parsedResult.data as RegisterSchemaType;
@@ -152,15 +152,18 @@ export const studentRegister = async (
       throw new AppError("Email already in use", 409);
     }
 
-    //upload profile image
+    //upload profile image and selfie video
+    const files = req.files as { [fieldname: string]: Express.Multer.File[] };
+
     let uploadedImage: { secure_url: string; public_id: string } | undefined;
-    if (req.file) {
-      if (!req.file.mimetype.startsWith("image/")) {
+    const imageFile = files?.['image']?.[0];
+    if (imageFile) {
+      if (!imageFile.mimetype.startsWith("image/")) {
         throw new AppError("Only image files are allowed", 400);
       }
 
       // Upload to Cloudinary once
-      const result = await handleUpload(req.file.buffer);
+      const result = await handleUpload(imageFile.buffer);
 
       if (!result || !result.secure_url || !result.public_id) {
         throw new AppError("Cloudinary upload failed", 400);
@@ -172,15 +175,15 @@ export const studentRegister = async (
       };
     }
 
-    //upload selfie video
     let uploadedVideo: { secure_url: string; public_id: string } | undefined;
-    if (req.file) {
-      if (!req.file.mimetype.startsWith("video/")) {
+    const videoFile = files?.['video']?.[0];
+    if (videoFile) {
+      if (!videoFile.mimetype.startsWith("video/")) {
         throw new AppError("Only video files are allowed", 400);
       }
 
       // Upload to Cloudinary once
-      const result = await handleUpload(req.file.buffer);
+      const result = await handleUpload(videoFile.buffer);
 
       if (!result || !result.secure_url || !result.public_id) {
         throw new AppError("Cloudinary upload failed", 400);

@@ -12,6 +12,14 @@ import {
   getExamQuestions,
   terminateAttempt,
   logCheatEvent,
+  deleteAdminProfileImage,
+  adminProfileUpdate,
+  addAdminProfileImage,
+  getAllStudents,
+  getStudentById,
+  getAllExams,
+  getExamById,
+  getExamAttempts,
 } from "../controllers/admin.controller";
 import { mediaUpload } from "../config/multer";
 import { authMiddleware } from "../middleware/auth.middleware";
@@ -20,29 +28,41 @@ const router = express.Router();
 
 router.post("/login", adminLogin);
 router.post("/logout", adminLogout);
-
+router.delete("/profile-image", authMiddleware, deleteAdminProfileImage);
 router.post("/register", mediaUpload.single("profileImage"), adminRegister);
-router.post("/create-exam/:id", authMiddleware, createExam);
-router.post("/update-exam/:id", authMiddleware, updateExam);
-router.post("/delete-exam/:id", authMiddleware, deleteExam);
+router.put(
+  "/profile",
+  authMiddleware,
+  mediaUpload.single("profileImage"),
+  adminProfileUpdate
+);
+router.put(
+  "/profile-image",
+  authMiddleware,
+  mediaUpload.single("profileImage"),
+  addAdminProfileImage
+);
 
-router.get("/exams/:examId", authMiddleware, getExamQuestions);
+// Student routes
+router.get("/students", authMiddleware, getAllStudents);
+router.get("/students/:studentId", authMiddleware, getStudentById);
 
-// Create question (examId from params)
-router.post("/exam/:examId", authMiddleware, createQuestion);
+// Exam routes
+router.get("/exams", authMiddleware, getAllExams);
+router.post("/exams", authMiddleware, createExam);
+router.get("/exams/:examId", authMiddleware, getExamById);
+router.get("/exams/:examId/questions", authMiddleware, getExamQuestions);
+router.get("/exams/:examId/attempts", authMiddleware, getExamAttempts);
+router.put("/exams/:examId", authMiddleware, updateExam);
+router.delete("/exams/:examId", authMiddleware, deleteExam);
 
+// Question routes
+router.post("/exams/:examId/questions", authMiddleware, createQuestion);
+router.put("/questions/:questionId", authMiddleware, updateQuestion);
+router.delete("/questions/:questionId", authMiddleware, deleteQuestion);
 
-
-// Update question (questionId from params)
-router.put("/question/:questionId", authMiddleware, updateQuestion);
-
-// Delete question
-router.delete("/question/:questionId", authMiddleware, deleteQuestion);
-
-//terminate attempt
-router.post("/attempt/:attemptId/terminate", authMiddleware, terminateAttempt);
-
-//manually log cheat event
-router.post("/attempt/:attemptId/cheat-event", authMiddleware, logCheatEvent);
+// Attempt management routes
+router.post("/attempts/:attemptId/terminate", authMiddleware, terminateAttempt);
+router.post("/attempts/:attemptId/cheat-events", authMiddleware, logCheatEvent);
 
 export default router;

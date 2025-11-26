@@ -6,6 +6,9 @@ import {
   CreateQuestionSchema,
   LoginSchema,
   LoginSchemaType,
+  LogCheatEventSchema,
+  UpdateAdminSchema,
+  UpdateAdminSchemaType,
   UpdateExamSchema,
   UpdateQuestionSchema,
 } from "../zodschemas";
@@ -13,13 +16,14 @@ import { Admin } from "../entity/Admin.entity";
 import { AppError } from "../utils/ErrorHandler";
 import bcrypt from "bcrypt";
 import { invalidateToken, signToken } from "../utils/jwt";
-import { handleUpload } from "../config/cloudinary";
+import { handleDelete, handleUpload } from "../config/cloudinary";
 import { hashPassword } from "../utils/hashPassword";
 import { Exam } from "../entity/Exam.entity";
 import { Option } from "../entity/Option.entity";
 import { Question, QuestionType } from "../entity/Question.entity";
 import { ExamAttempt } from "../entity/ExamAttempt.entity";
 import { CheatEvent } from "../entity/CheatEvent.entity";
+import { Student } from "../entity/Student.entity";
 
 export const adminLogin = async (
   req: Request,
@@ -30,7 +34,7 @@ export const adminLogin = async (
     // Validate request body
     const parsedResult = LoginSchema.safeParse(req.body);
     if (!parsedResult.success) {
-     return next(parsedResult.error);
+      return next(parsedResult.error);
     }
 
     const { email, password, rememberMe } =
@@ -42,14 +46,13 @@ export const adminLogin = async (
     });
 
     if (!admin) {
-      throw new AppError("Invalid credentials", 403);
+      throw new AppError("Invalid credentials", 401);
     }
-
 
     // Compare password
     const isValid = await bcrypt.compare(password, admin.password);
     if (!isValid) {
-      throw new AppError("Invalid credentials (password)", 403);
+      throw new AppError("Invalid credentials", 401);
     }
 
     // Generate access token (short-lived JWT)
@@ -130,7 +133,7 @@ export const adminRegister = async (
   try {
     const parsedResult = AdminRegisterSchema.safeParse(req.body);
     if (!parsedResult.success) {
-      next(parsedResult.error);
+      return next(parsedResult.error);
     }
     const { email, password, fullName } =
       parsedResult.data as AdminRegisterSchemaType;
@@ -178,6 +181,129 @@ export const adminRegister = async (
   }
 };
 
+export const adminProfileUpdate = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const parsedResult = UpdateAdminSchema.safeParse(req.body);
+    if (!parsedResult.success) {
+      return next(parsedResult.error);
+    }
+
+    const { email, fullName } = parsedResult.data as UpdateAdminSchemaType;
+
+    const admin = await Admin.findOneBy({ id: req.user.id });
+    if (!admin) {
+      throw new AppError("Admin not found", 404);
+    }
+    if (email && email !== admin.email) {
+      const isExisting = await Admin.findOne({ where: { email } });
+      if (isExisting) {
+        throw new AppError("Email already in use", 409);
+      }
+      admin.email = email;
+    }
+    if (fullName) admin.fullName = fullName;
+
+    await admin.save();
+
+    res
+      .status(200)
+      .json({ message: "Admin updated successfully", user: admin });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const addAdminProfileImage = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const admin = await Admin.findOneBy({ id: req.user.id });
+    if (!admin) {
+      throw new AppError("Admin not found", 404);
+    }
+
+    if (admin.profileImagePublicId) {
+      try {
+        await handleDelete(admin.profileImagePublicId);
+      } catch (error) {
+        throw new AppError("Failed to delete previous image", 400);
+      }
+    }
+
+    let uploadedImage: { secure_url: string; public_id: string } | undefined;
+    if (req.file) {
+      if (!req.file.mimetype.startsWith("image/")) {
+        throw new AppError("Only image files are allowed", 400);
+      }
+
+      // Upload to Cloudinary once
+      const result = await handleUpload(req.file.buffer);
+
+      if (!result || !result.secure_url || !result.public_id) {
+        throw new AppError("Cloudinary upload failed", 400);
+      }
+
+      uploadedImage = {
+        secure_url: result.secure_url,
+        public_id: result.public_id,
+      };
+    }
+
+    if (uploadedImage) {
+      admin.profileImage = uploadedImage.secure_url;
+      admin.profileImagePublicId = uploadedImage.public_id;
+    }
+
+    await admin.save();
+
+    res.status(200).json({
+      message: "Admin profile image added successfully",
+      user: admin,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const deleteAdminProfileImage = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const admin = await Admin.findOneBy({ id: req.user.id });
+    if (!admin) {
+      throw new AppError("Admin not found", 404);
+    }
+
+    if (admin.profileImagePublicId) {
+      try {
+        await handleDelete(admin.profileImagePublicId);
+      } catch (error) {
+        throw new AppError("Failed to delete previous image", 400);
+      }
+    }
+
+    admin.profileImage = null;
+    admin.profileImagePublicId = null;
+
+    await admin.save();
+
+    res.status(200).json({
+      message: "Admin profile image deleted successfully",
+      user: admin,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const createExam = async (
   req: Request,
   res: Response,
@@ -187,7 +313,7 @@ export const createExam = async (
     // Validate data
     const parsed = CreateExamSchema.safeParse(req.body);
     if (!parsed.success) {
-      next(parsed.error);
+      return next(parsed.error);
     }
 
     const data = parsed.data;
@@ -214,7 +340,7 @@ export const getExamQuestions = async (
   next: NextFunction
 ) => {
   try {
-    const examId = req.params.id;
+    const examId = req.params.examId;
 
     const questions = await Question.find({
       where: { exam: { id: examId } },
@@ -236,12 +362,12 @@ export const updateExam = async (
     // Validate input
     const parsed = UpdateExamSchema.safeParse(req.body);
     if (!parsed.success) {
-      next(parsed.error);
+      return next(parsed.error);
     }
 
     const data = parsed.data;
 
-    const examId = req.params.id;
+    const examId = req.params.examId;
 
     const exam = await Exam.findOne({
       where: { id: examId },
@@ -254,6 +380,31 @@ export const updateExam = async (
 
     if (exam.createdBy.id !== req.user.id) {
       throw new AppError("You cannot modify this exam", 403);
+    }
+
+    // Check if exam has already started
+    const now = new Date();
+    const examStartTime = new Date(exam.startTime);
+
+    if (now >= examStartTime) {
+      throw new AppError("Cannot update exam after it has started", 400);
+    }
+
+    // Only allow updating time-related fields before exam starts
+    // Prevent updating if trying to change time to past
+    if (data.startTime) {
+      const newStartTime = new Date(data.startTime);
+      if (newStartTime < now) {
+        throw new AppError("Cannot set exam start time to past", 400);
+      }
+    }
+
+    if (data.endTime) {
+      const newEndTime = new Date(data.endTime);
+      const startTime = data.startTime ? new Date(data.startTime) : examStartTime;
+      if (newEndTime <= startTime) {
+        throw new AppError("End time must be after start time", 400);
+      }
     }
 
     // Update data
@@ -276,7 +427,7 @@ export const deleteExam = async (
   next: NextFunction
 ) => {
   try {
-    const examId = req.params.id;
+    const examId = req.params.examId;
 
     if (!examId) {
       throw new AppError("Exam ID is required", 400);
@@ -320,9 +471,27 @@ export const createQuestion = async (
 
     const data = parsed.data;
 
-    // Check exam exists
-    const exam = await Exam.findOne({ where: { id: examId } });
+    // Check exam exists and verify ownership
+    const exam = await Exam.findOne({
+      where: { id: examId },
+      relations: ["createdBy", "questions"]
+    });
     if (!exam) throw new AppError("Exam not found", 404);
+
+    if (exam.createdBy.id !== req.user.id) {
+      throw new AppError("You cannot modify this exam", 403);
+    }
+
+    // Calculate current total marks of existing questions
+    const currentTotalMarks = exam.questions?.reduce((sum, q) => sum + q.marks, 0) || 0;
+
+    // Check if adding this question would exceed exam total marks
+    if (currentTotalMarks + data.marks > exam.totalMarks) {
+      throw new AppError(
+        `Cannot add question. Total marks would be ${currentTotalMarks + data.marks} which exceeds exam total marks of ${exam.totalMarks}. Remaining marks: ${exam.totalMarks - currentTotalMarks}`,
+        400
+      );
+    }
 
     // Create question
     const question = Question.create({
@@ -350,9 +519,15 @@ export const createQuestion = async (
       await Option.save(optionEntities);
     }
 
+    // Calculate new total marks after adding this question
+    const newTotalMarks = currentTotalMarks + data.marks;
+
     res.status(201).json({
       message: "Question created successfully",
       questionId: question.id,
+      currentTotalMarks: newTotalMarks,
+      examTotalMarks: exam.totalMarks,
+      remainingMarks: exam.totalMarks - newTotalMarks,
     });
   } catch (err) {
     next(err);
@@ -374,10 +549,30 @@ export const updateQuestion = async (
 
     const question = await Question.findOne({
       where: { id: questionId },
-      relations: ["options"],
+      relations: ["options", "exam", "exam.questions"],
     });
 
     if (!question) throw new AppError("Question not found", 404);
+
+    // If marks are being updated, validate against exam total marks
+    if (data.marks !== undefined && data.marks !== question.marks) {
+      const exam = question.exam;
+
+      // Calculate total marks of all questions except this one
+      const otherQuestionsMarks = exam.questions
+        ?.filter((q) => q.id !== questionId)
+        .reduce((sum, q) => sum + q.marks, 0) || 0;
+
+      // Check if new total would exceed exam total marks
+      const newTotalMarks = otherQuestionsMarks + data.marks;
+
+      if (newTotalMarks > exam.totalMarks) {
+        throw new AppError(
+          `Cannot update question marks. Total marks would be ${newTotalMarks} which exceeds exam total marks of ${exam.totalMarks}. Available marks for this question: ${exam.totalMarks - otherQuestionsMarks}`,
+          400
+        );
+      }
+    }
 
     // Update base fields
     Object.assign(question, data);
@@ -398,7 +593,20 @@ export const updateQuestion = async (
       await Option.save(newOptions);
     }
 
-    res.json({ message: "Question updated successfully" });
+    // Calculate and return updated totals
+    const exam = await Exam.findOne({
+      where: { id: question.exam.id },
+      relations: ["questions"],
+    });
+
+    const currentTotalMarks = exam?.questions?.reduce((sum, q) => sum + q.marks, 0) || 0;
+
+    res.json({
+      message: "Question updated successfully",
+      currentTotalMarks,
+      examTotalMarks: exam?.totalMarks,
+      remainingMarks: (exam?.totalMarks || 0) - currentTotalMarks,
+    });
   } catch (err) {
     next(err);
   }
@@ -455,7 +663,11 @@ export const logCheatEvent = async (
 ) => {
   try {
     const { attemptId } = req.params;
-    const { eventType, confidence, screenshot } = req.body;
+
+    const parsed = LogCheatEventSchema.safeParse(req.body);
+    if (!parsed.success) return next(parsed.error);
+
+    const { eventType, confidence, screenshot } = parsed.data;
 
     const attempt = await ExamAttempt.findOne({ where: { id: attemptId } });
     if (!attempt) throw new AppError("Attempt not found", 404);
@@ -470,6 +682,144 @@ export const logCheatEvent = async (
     await evt.save();
 
     return res.json({ message: "Event logged" });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// =================== GET ALL STUDENTS ===================
+export const getAllStudents = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const students = await Student.find({
+      select: [
+        "id",
+        "fullName",
+        "email",
+        "phoneNumber",
+        "profileImage",
+        "dob",
+        "gender",
+        "selfieVideo",
+        "createdAt",
+        "updatedAt",
+      ],
+    });
+
+    res.json(students);
+  } catch (err) {
+    next(err);
+  }
+};
+
+// =================== GET SINGLE STUDENT ===================
+export const getStudentById = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { studentId } = req.params;
+
+    const student = await Student.findOne({
+      where: { id: studentId },
+      select: [
+        "id",
+        "fullName",
+        "email",
+        "phoneNumber",
+        "profileImage",
+        "dob",
+        "gender",
+        "selfieVideo",
+        "createdAt",
+        "updatedAt",
+      ],
+    });
+
+    if (!student) {
+      throw new AppError("Student not found", 404);
+    }
+
+    res.json(student);
+  } catch (err) {
+    next(err);
+  }
+};
+
+// =================== GET ALL EXAMS ===================
+export const getAllExams = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const exams = await Exam.find({
+      relations: ["createdBy", "questions"],
+      order: { createdAt: "DESC" },
+    });
+
+    // Calculate question count for each exam
+    const examsWithCount = exams.map(exam => ({
+      ...exam,
+      questionCount: exam.questions?.length || 0,
+    }));
+
+    res.json(examsWithCount);
+  } catch (err) {
+    next(err);
+  }
+};
+
+// =================== GET SINGLE EXAM ===================
+export const getExamById = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { examId } = req.params;
+
+    const exam = await Exam.findOne({
+      where: { id: examId },
+      relations: ["createdBy", "questions"],
+    });
+
+    if (!exam) {
+      throw new AppError("Exam not found", 404);
+    }
+
+    // Calculate question count
+    const examWithCount = {
+      ...exam,
+      questionCount: exam.questions?.length || 0,
+    };
+
+    res.json(examWithCount);
+  } catch (err) {
+    next(err);
+  }
+};
+
+// =================== GET EXAM ATTEMPTS ===================
+export const getExamAttempts = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { examId } = req.params;
+
+    const attempts = await ExamAttempt.find({
+      where: { exam: { id: examId } },
+      relations: ["student", "exam"],
+      order: { startedAt: "DESC" },
+    });
+
+    res.json(attempts);
   } catch (err) {
     next(err);
   }

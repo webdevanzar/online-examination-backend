@@ -6,8 +6,10 @@ import {
   UpdateDateColumn,
   BaseEntity,
   ManyToOne,
+  OneToMany,
 } from "typeorm";
 import { Admin } from "./Admin.entity";
+import { Question } from "./Question.entity";
 
 @Entity({ name: "exams" })
 export class Exam extends BaseEntity {
@@ -63,6 +65,9 @@ export class Exam extends BaseEntity {
 
   @ManyToOne(() => Admin, {cascade: true, onDelete: "CASCADE"})
   createdBy!: Admin;
+
+  @OneToMany(() => Question, (question) => question.exam)
+  questions!: Question[];
 
   // Audit
   @CreateDateColumn()

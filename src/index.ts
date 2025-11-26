@@ -19,7 +19,11 @@ app.use(cookieParser());
 // Middleware
 app.use(
   cors({
-    origin: ["http://localhost:5173", "http://localhost:4000"],
+    origin: [
+      "http://localhost:5173",
+      "http://localhost:4000",
+      "http://localhost:5174",
+    ],
     credentials: true,
   })
 );
