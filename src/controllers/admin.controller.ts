@@ -22,6 +22,8 @@ import { Exam } from "../entity/Exam.entity";
 import { Option } from "../entity/Option.entity";
 import { Question, QuestionType } from "../entity/Question.entity";
 import { ExamAttempt } from "../entity/ExamAttempt.entity";
+import { Notification, NotificationType } from "../entity/Notification.entitty";
+import { NotificationProfile } from "../entity/NotificationProfile.entity";
 import { CheatEvent } from "../entity/CheatEvent.entity";
 import { Student } from "../entity/Student.entity";
 
@@ -318,8 +320,14 @@ export const createExam = async (
 
     const data = parsed.data;
 
+    // compute duration in minutes from start and end
+    const start = new Date(data.startTime);
+    const end = new Date(data.endTime);
+    const durationMinutes = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (60 * 1000)));
+
     const exam = Exam.create({
       ...data,
+      duration: durationMinutes,
       createdBy: { id: req.user.id } as any, // attach admin FK
     });
 
@@ -407,10 +415,49 @@ export const updateExam = async (
       }
     }
 
+    // Track publish state before update
+    const wasPublished = !!exam.isPublished;
+
+    // If request attempts to publish, ensure questions cover all marks
+    if (data.isPublished === true) {
+      // compute sum of existing question marks
+      const questions = await Question.find({ where: { exam: { id: examId } } });
+      const assignedMarks = questions.reduce((sum, q) => sum + (q.marks || 0), 0);
+      const targetTotal = data.totalMarks !== undefined ? data.totalMarks : exam.totalMarks;
+
+      if (assignedMarks !== targetTotal) {
+        const remaining = targetTotal - assignedMarks;
+        throw new AppError(
+          remaining > 0
+            ? `Cannot publish. Remaining marks to assign: ${remaining}`
+            : `Cannot publish. Assigned marks (${assignedMarks}) exceed total marks (${targetTotal}).`,
+          400
+        );
+      }
+    }
+
     // Update data
     Object.assign(exam, data);
 
     await exam.save();
+
+    // If exam just got published, notify all students
+    if (!wasPublished && exam.isPublished === true) {
+      const notification = Notification.create({
+        type: NotificationType.EXAM_SCHEDULED,
+        message: `New exam published: ${exam.title}`,
+        targetId: exam.id,
+      });
+      await notification.save();
+
+      const students = await Student.find({ select: ["id"] });
+      if (students.length > 0) {
+        const profiles = students.map((s) =>
+          NotificationProfile.create({ notification, student: { id: s.id } as any })
+        );
+        await NotificationProfile.save(profiles);
+      }
+    }
 
     res.json({
       message: "Exam updated successfully",

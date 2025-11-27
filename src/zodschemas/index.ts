@@ -54,14 +54,12 @@ export type UpdateAdminSchemaType = z.infer<typeof UpdateAdminSchema>;
 export const CreateExamSchema = z
   .object({
     title: z.string().min(3, "Title is required"),
-    description: z.string().min(5, "Description is required"),
+    description: z.string().optional(),
     subject: z.string().min(2, "Subject is required"),
     instructions: z.string().optional(),
 
     startTime: z.coerce.date(),
     endTime: z.coerce.date(),
-
-    duration: z.number().min(1, "Duration must be at least 1 minute"),
 
     totalMarks: z.number().min(1),
     passingMarks: z.number().min(0),
@@ -99,7 +97,7 @@ export const CreateQuestionSchema = z
   .object({
     type: z.enum(QuestionType),
 
-    questionText: z.string().min(5),
+    questionText: z.string().min(1),
 
     marks: z.number().min(0.1).default(1),
 

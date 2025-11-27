@@ -8,6 +8,8 @@ import adminRouter from "./routes/admin.routes";
 import studentRouter from "./routes/student.routes";
 import * as proctoringController from "./controllers/proctoring.controller";
 import { errorHandler } from "./utils/ErrorHandler";
+import cron from "node-cron";
+import { Exam } from "./entity/Exam.entity";
 dotenv.config();
 
 const app = express();
@@ -53,5 +55,18 @@ AppDataSource.initialize()
       console.log("Server is running on http://localhost:" + PORT);
     });
     console.log("Data Source has been initialized!");
+
+    // Cron: every minute, deactivate exams whose endTime has passed
+    cron.schedule("* * * * *", async () => {
+      try {
+        await Exam.createQueryBuilder()
+          .update(Exam)
+          .set({ isActive: false })
+          .where("endTime < :now AND isActive = :active", { now: new Date(), active: true })
+          .execute();
+      } catch (err) {
+        console.error("Cron job failed to deactivate expired exams:", err);
+      }
+    });
   })
   .catch((error) => console.log(error));
