@@ -824,3 +824,4 @@ export const getExamAttempts = async (
     next(err);
   }
 };
+
