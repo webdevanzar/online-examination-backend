@@ -26,6 +26,8 @@ import { Notification, NotificationType } from "../entity/Notification.entitty";
 import { NotificationProfile } from "../entity/NotificationProfile.entity";
 import { CheatEvent } from "../entity/CheatEvent.entity";
 import { Student } from "../entity/Student.entity";
+import axios from "axios";
+const GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo";
 
 export const adminLogin = async (
   req: Request,
@@ -49,6 +51,13 @@ export const adminLogin = async (
 
     if (!admin) {
       throw new AppError("Invalid credentials", 401);
+    }
+
+    if (admin.provider === "google") {
+      throw new AppError(
+        "This email is registered with google. Please use google login.",
+        409
+      );
     }
 
     // Compare password
@@ -87,6 +96,105 @@ export const adminLogin = async (
 
     return res.status(200).json({
       message: "Login successful",
+      accessToken: accessTokenData.token,
+      refreshToken: refreshTokenData.token,
+      user: {
+        id: admin.id,
+        fullName: admin.fullName,
+        email: admin.email,
+        profileImage: admin.profileImage,
+        isActive: admin.isActive,
+        createdAt: admin.createdAt,
+        updatedAt: admin.updatedAt,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const adminGoogleAuth = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { accessToken, rememberMe } = req.body;
+
+    if (!accessToken) {
+      throw new AppError("Google access token missing", 400);
+    }
+
+    // Fetch user info from Google
+    const { data } = await axios.get(GOOGLE_USERINFO_URL, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+
+    const {
+      email,
+      name: fullName,
+      picture,
+    } = data;
+
+    if (!email) {
+      throw new AppError("Google account has no email", 400);
+    }
+
+    //  Find admin by email
+    let admin = await Admin.findOne({ where: { email } });
+
+    // Existing LOCAL account → block Google login
+    if (admin && admin.provider === "local") {
+      throw new AppError(
+        "This email is registered with password. Please use normal login.",
+        409
+      );
+    }
+
+    //  Create account if not exists (Google signup)
+    if (!admin) {
+      admin = Admin.create({
+        email,
+        fullName,
+        profileImage: picture,
+        provider: "google",
+        password: null,
+        isActive: true,
+      });
+
+      await admin.save();
+    }
+
+    // Generate tokens
+    const tokenPayload = {
+      id: admin.id,
+      fullName: admin.fullName,
+      email: admin.email,
+    };
+
+    const accessTokenData = signToken(tokenPayload, true, rememberMe);
+    const refreshTokenData = signToken(tokenPayload, false, rememberMe);
+
+    //  Set cookies (same as manual login)
+    res.cookie("accessToken", accessTokenData.token, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "none",
+      maxAge: accessTokenData.maxAge,
+    });
+
+    res.cookie("refreshToken", refreshTokenData.token, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "none",
+      maxAge: refreshTokenData.maxAge,
+    });
+
+    //  Response
+    return res.status(200).json({
+      message: "Google authentication successful",
       accessToken: accessTokenData.token,
       refreshToken: refreshTokenData.token,
       user: {
@@ -174,6 +282,7 @@ export const adminRegister = async (
       email,
       profileImage: uploadedImage?.secure_url,
       profileImagePublicId: uploadedImage?.public_id,
+      provider: "local",
       password: hashedPassword,
     });
     await authData.save();
@@ -323,7 +432,10 @@ export const createExam = async (
     // compute duration in minutes from start and end
     const start = new Date(data.startTime);
     const end = new Date(data.endTime);
-    const durationMinutes = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (60 * 1000)));
+    const durationMinutes = Math.max(
+      1,
+      Math.ceil((end.getTime() - start.getTime()) / (60 * 1000))
+    );
 
     const exam = Exam.create({
       ...data,
@@ -409,7 +521,9 @@ export const updateExam = async (
 
     if (data.endTime) {
       const newEndTime = new Date(data.endTime);
-      const startTime = data.startTime ? new Date(data.startTime) : examStartTime;
+      const startTime = data.startTime
+        ? new Date(data.startTime)
+        : examStartTime;
       if (newEndTime <= startTime) {
         throw new AppError("End time must be after start time", 400);
       }
@@ -421,9 +535,15 @@ export const updateExam = async (
     // If request attempts to publish, ensure questions cover all marks
     if (data.isPublished === true) {
       // compute sum of existing question marks
-      const questions = await Question.find({ where: { exam: { id: examId } } });
-      const assignedMarks = questions.reduce((sum, q) => sum + (q.marks || 0), 0);
-      const targetTotal = data.totalMarks !== undefined ? data.totalMarks : exam.totalMarks;
+      const questions = await Question.find({
+        where: { exam: { id: examId } },
+      });
+      const assignedMarks = questions.reduce(
+        (sum, q) => sum + (q.marks || 0),
+        0
+      );
+      const targetTotal =
+        data.totalMarks !== undefined ? data.totalMarks : exam.totalMarks;
 
       if (assignedMarks !== targetTotal) {
         const remaining = targetTotal - assignedMarks;
@@ -453,7 +573,10 @@ export const updateExam = async (
       const students = await Student.find({ select: ["id"] });
       if (students.length > 0) {
         const profiles = students.map((s) =>
-          NotificationProfile.create({ notification, student: { id: s.id } as any })
+          NotificationProfile.create({
+            notification,
+            student: { id: s.id } as any,
+          })
         );
         await NotificationProfile.save(profiles);
       }
@@ -521,7 +644,7 @@ export const createQuestion = async (
     // Check exam exists and verify ownership
     const exam = await Exam.findOne({
       where: { id: examId },
-      relations: ["createdBy", "questions"]
+      relations: ["createdBy", "questions"],
     });
     if (!exam) throw new AppError("Exam not found", 404);
 
@@ -530,12 +653,17 @@ export const createQuestion = async (
     }
 
     // Calculate current total marks of existing questions
-    const currentTotalMarks = exam.questions?.reduce((sum, q) => sum + q.marks, 0) || 0;
+    const currentTotalMarks =
+      exam.questions?.reduce((sum, q) => sum + q.marks, 0) || 0;
 
     // Check if adding this question would exceed exam total marks
     if (currentTotalMarks + data.marks > exam.totalMarks) {
       throw new AppError(
-        `Cannot add question. Total marks would be ${currentTotalMarks + data.marks} which exceeds exam total marks of ${exam.totalMarks}. Remaining marks: ${exam.totalMarks - currentTotalMarks}`,
+        `Cannot add question. Total marks would be ${
+          currentTotalMarks + data.marks
+        } which exceeds exam total marks of ${
+          exam.totalMarks
+        }. Remaining marks: ${exam.totalMarks - currentTotalMarks}`,
         400
       );
     }
@@ -606,16 +734,21 @@ export const updateQuestion = async (
       const exam = question.exam;
 
       // Calculate total marks of all questions except this one
-      const otherQuestionsMarks = exam.questions
-        ?.filter((q) => q.id !== questionId)
-        .reduce((sum, q) => sum + q.marks, 0) || 0;
+      const otherQuestionsMarks =
+        exam.questions
+          ?.filter((q) => q.id !== questionId)
+          .reduce((sum, q) => sum + q.marks, 0) || 0;
 
       // Check if new total would exceed exam total marks
       const newTotalMarks = otherQuestionsMarks + data.marks;
 
       if (newTotalMarks > exam.totalMarks) {
         throw new AppError(
-          `Cannot update question marks. Total marks would be ${newTotalMarks} which exceeds exam total marks of ${exam.totalMarks}. Available marks for this question: ${exam.totalMarks - otherQuestionsMarks}`,
+          `Cannot update question marks. Total marks would be ${newTotalMarks} which exceeds exam total marks of ${
+            exam.totalMarks
+          }. Available marks for this question: ${
+            exam.totalMarks - otherQuestionsMarks
+          }`,
           400
         );
       }
@@ -646,7 +779,8 @@ export const updateQuestion = async (
       relations: ["questions"],
     });
 
-    const currentTotalMarks = exam?.questions?.reduce((sum, q) => sum + q.marks, 0) || 0;
+    const currentTotalMarks =
+      exam?.questions?.reduce((sum, q) => sum + q.marks, 0) || 0;
 
     res.json({
       message: "Question updated successfully",
@@ -810,7 +944,7 @@ export const getAllExams = async (
     });
 
     // Calculate question count for each exam
-    const examsWithCount = exams.map(exam => ({
+    const examsWithCount = exams.map((exam) => ({
       ...exam,
       questionCount: exam.questions?.length || 0,
     }));
@@ -871,4 +1005,3 @@ export const getExamAttempts = async (
     next(err);
   }
 };
-

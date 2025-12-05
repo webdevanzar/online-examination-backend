@@ -36,6 +36,24 @@ export class ExamAttempt extends BaseEntity {
   @Column({ default: false })
   isSubmitted!: boolean;
 
+  @Column({ type: "int", default: 0 })
+  warningCount!: number;
+
+  @Column({ type: "int", default: 3 })
+  maxWarnings!: number;
+
+  @Column({ default: false })
+  isTerminated!: boolean;
+
+  @Column({ type: "text", nullable: true })
+  terminationReason!: string;
+
+  @Column({ default: false })
+  isFaceEnrolled!: boolean;
+
+  @Column({ default: false })
+  isKeystrokeEnrolled!: boolean;
+
   @OneToMany(() => Answer, (answer)=> answer.attempt, {cascade: true})
   answers!: Answer[];
 

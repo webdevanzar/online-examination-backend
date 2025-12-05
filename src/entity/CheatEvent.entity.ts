@@ -25,6 +25,15 @@ export class CheatEvent extends BaseEntity {
   @Column({ type: "text", nullable: true })
   screenshot!: string; // base64
 
+  @Column({ type: "varchar", default: "minor" })
+  severity!: "minor" | "major";
+
+  @Column({ default: false })
+  causedWarning!: boolean;
+
+  @Column({ default: false })
+  causedTermination!: boolean;
+
   @CreateDateColumn()
   createdAt!: Date;
 }

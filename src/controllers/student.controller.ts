@@ -10,7 +10,7 @@ import { AppError } from "../utils/ErrorHandler";
 import bcrypt from "bcrypt";
 import { NotificationProfile } from "../entity/NotificationProfile.entity";
 import { invalidateToken, signToken } from "../utils/jwt";
-import { handleUpload } from "../config/cloudinary";
+import { handleDelete, handleUpload } from "../config/cloudinary";
 import { hashPassword } from "../utils/hashPassword";
 import { Question } from "../entity/Question.entity";
 import { Answer } from "../entity/Answer.entity";
@@ -19,6 +19,7 @@ import { Exam } from "../entity/Exam.entity";
 import { Option } from "../entity/Option.entity";
 import { CheatEvent } from "../entity/CheatEvent.entity";
 import axios from "axios";
+const GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo";
 
 export const studentLogin = async (
   req: Request,
@@ -41,13 +42,20 @@ export const studentLogin = async (
     });
 
     if (!student) {
-      throw new AppError("Invalid credentials", 401);
+      throw new AppError("Invalid credentials", 400);
+    }
+
+    if (student.provider === "google") {
+      throw new AppError(
+        "This email is registered with google. Please use google login.",
+        409
+      );
     }
 
     // Compare password
     const isValid = await bcrypt.compare(password, student.password);
     if (!isValid) {
-      throw new AppError("Invalid credentials", 401);
+      throw new AppError("Invalid credentials", 400);
     }
 
     //notification count
@@ -109,6 +117,127 @@ export const studentLogin = async (
   }
 };
 
+export const studentGoogleAuth = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { accessToken, rememberMe } = req.body;
+
+    if (!accessToken) {
+      throw new AppError("Google access token missing", 400);
+    }
+
+    // Fetch user info from Google
+    const { data } = await axios.get(GOOGLE_USERINFO_URL, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+
+    const { email, name: fullName, picture } = data;
+
+    if (!email) {
+      throw new AppError("Google account has no email", 400);
+    }
+
+    //  Find admin by email
+    let student = await Student.findOne({ where: { email } });
+
+    // Existing LOCAL account → block Google login
+    if (student && student.provider === "local") {
+      throw new AppError(
+        "This email is registered with password. Please use normal login.",
+        409
+      );
+    }
+
+    //  Create account if not exists (Google signup)
+    if (!student) {
+      student = Student.create({
+        email,
+        fullName,
+        profileImage: picture,
+        provider: "google",
+        password: null,
+      });
+
+      await student.save();
+    }
+
+    // Generate tokens
+    const tokenPayload = {
+      id: student.id,
+      fullName: student.fullName,
+      email: student.email,
+    };
+
+    const accessTokenData = signToken(tokenPayload, true, rememberMe);
+    const refreshTokenData = signToken(tokenPayload, false, rememberMe);
+
+    //  Set cookies (same as manual login)
+    res.cookie("accessToken", accessTokenData.token, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "none",
+      maxAge: accessTokenData.maxAge,
+    });
+
+    res.cookie("refreshToken", refreshTokenData.token, {
+      httpOnly: true,
+      secure: true,
+      sameSite: "none",
+      maxAge: refreshTokenData.maxAge,
+    });
+
+    //  Response
+    return res.status(200).json({
+      message: "Google authentication successful",
+      accessToken: accessTokenData.token,
+      refreshToken: refreshTokenData.token,
+      user: {
+        id: student.id,
+        fullName: student.fullName,
+        email: student.email,
+        profileImage: student.profileImage,
+        createdAt: student.createdAt,
+        updatedAt: student.updatedAt,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getMe = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const id = req.user.id;
+    const student = await Student.findOne({ where: { id } });
+    if (!student) throw new AppError("Student not found", 404);
+    return res.json({
+      user: {
+        id: student.id,
+        fullName: student.fullName,
+        email: student.email,
+        phoneNumber: student.phoneNumber,
+        profileImage: student.profileImage,
+        dob: student.dob,
+        gender: student.gender,
+        selfieVideo: student.selfieVideo,
+        createdAt: student.createdAt,
+        updatedAt: student.updatedAt,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 export const studentLogout = (
   req: Request,
   res: Response,
@@ -122,9 +251,17 @@ export const studentLogout = (
     if (accessToken) invalidateToken(accessToken);
     if (refreshToken) invalidateToken(refreshToken);
 
-    // Clear cookies
-    res.clearCookie("accessToken");
-    res.clearCookie("refreshToken");
+    // Clear cookies (must match cookie attributes used when setting)
+    res.clearCookie("accessToken", {
+      httpOnly: true,
+      secure: true,
+      sameSite: "none",
+    });
+    res.clearCookie("refreshToken", {
+      httpOnly: true,
+      secure: true,
+      sameSite: "none",
+    });
 
     return res.status(200).json({ message: "Logged out successfully" });
   } catch (err) {
@@ -138,7 +275,6 @@ export const studentRegister = async (
   next: NextFunction
 ) => {
   try {
-    console.log("Registering user...");
     const parsedResult = RegisterSchema.safeParse(req.body);
     if (!parsedResult.success) {
       return next(parsedResult.error);
@@ -152,49 +288,6 @@ export const studentRegister = async (
       throw new AppError("Email already in use", 409);
     }
 
-    //upload profile image and selfie video
-    const files = req.files as { [fieldname: string]: Express.Multer.File[] };
-
-    let uploadedImage: { secure_url: string; public_id: string } | undefined;
-    const imageFile = files?.['image']?.[0];
-    if (imageFile) {
-      if (!imageFile.mimetype.startsWith("image/")) {
-        throw new AppError("Only image files are allowed", 400);
-      }
-
-      // Upload to Cloudinary once
-      const result = await handleUpload(imageFile.buffer);
-
-      if (!result || !result.secure_url || !result.public_id) {
-        throw new AppError("Cloudinary upload failed", 400);
-      }
-
-      uploadedImage = {
-        secure_url: result.secure_url,
-        public_id: result.public_id,
-      };
-    }
-
-    let uploadedVideo: { secure_url: string; public_id: string } | undefined;
-    const videoFile = files?.['video']?.[0];
-    if (videoFile) {
-      if (!videoFile.mimetype.startsWith("video/")) {
-        throw new AppError("Only video files are allowed", 400);
-      }
-
-      // Upload to Cloudinary once
-      const result = await handleUpload(videoFile.buffer);
-
-      if (!result || !result.secure_url || !result.public_id) {
-        throw new AppError("Cloudinary upload failed", 400);
-      }
-
-      uploadedVideo = {
-        secure_url: result.secure_url,
-        public_id: result.public_id,
-      };
-    }
-
     //hash password
     const hashedPassword = await hashPassword(password);
 
@@ -204,14 +297,232 @@ export const studentRegister = async (
       phoneNumber,
       gender,
       dob,
-      profileImage: uploadedImage?.secure_url,
-      profileImagePublicId: uploadedImage?.public_id,
-      selfieVideo: uploadedVideo?.secure_url,
-      selfieVideoPublicId: uploadedVideo?.public_id,
       password: hashedPassword,
     });
     await authData.save();
     res.status(201).json({ message: "Student registered successfully" });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const studentProfileUpdate = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const id = req.user.id;
+    const { fullName, phoneNumber, gender, dob } = req.body;
+
+    const student = await Student.findOne({ where: { id } });
+
+    if (!student) throw new AppError("Student not found", 404);
+
+    student.fullName = fullName;
+    student.phoneNumber = phoneNumber;
+    student.gender = gender;
+    student.dob = dob;
+
+    await student.save();
+
+    res.status(200).json({
+      message: "Student profile updated successfully",
+      user: {
+        id: student.id,
+        fullName: student.fullName,
+        email: student.email,
+        phoneNumber: student.phoneNumber,
+        profileImage: student.profileImage,
+        dob: student.dob,
+        gender: student.gender,
+        selfieVideo: student.selfieVideo,
+        createdAt: student.createdAt,
+        updatedAt: student.updatedAt,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const studentProfileImageUpdate = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const id = req.user.id;
+
+    const student = await Student.findOne({ where: { id } });
+    if (!student) {
+      throw new AppError("Student not found", 404);
+    }
+
+    const file = req.file;
+    if (!file) {
+      throw new AppError("Profile image is required", 400);
+    }
+
+    if (!file.mimetype.startsWith("image/")) {
+      throw new AppError("Only image files are allowed", 400);
+    }
+
+    // ✅ delete old image if exists
+    if (student.profileImagePublicId) {
+      await handleDelete(student.profileImagePublicId);
+    }
+
+    const result = await handleUpload(file.buffer, "image");
+
+    if (!result?.secure_url || !result?.public_id) {
+      throw new AppError("Image upload failed", 400);
+    }
+
+    student.profileImage = result.secure_url;
+    student.profileImagePublicId = result.public_id;
+
+    await student.save();
+
+    res.status(200).json({
+      message: "Student profile image updated successfully",
+      user: {
+        id: student.id,
+        fullName: student.fullName,
+        email: student.email,
+        phoneNumber: student.phoneNumber,
+        profileImage: student.profileImage,
+        dob: student.dob,
+        gender: student.gender,
+        selfieVideo: student.selfieVideo,
+        createdAt: student.createdAt,
+        updatedAt: student.updatedAt,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const studentProfileImageDelete = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const student = await Student.findOneBy({ id: req.user.id });
+    if (!student) {
+      throw new AppError("Student not found", 404);
+    }
+
+    if (student.profileImagePublicId) {
+      try {
+        await handleDelete(student.profileImagePublicId);
+      } catch (error) {
+        throw new AppError("Failed to delete previous image", 400);
+      }
+    }
+
+    student.profileImage = null;
+    student.profileImagePublicId = null;
+
+    await student.save();
+
+    res.status(200).json({
+      message: "Student profile image deleted successfully",
+      user: student,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const studentSelfieVideoUpdate = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const id = req.user.id;
+
+    const student = await Student.findOne({ where: { id } });
+    if (!student) {
+      throw new AppError("Student not found", 404);
+    }
+
+    const file = req.file;
+    if (!file) {
+      throw new AppError("Selfie video is required", 400);
+    }
+
+    if (!file.mimetype.startsWith("video/")) {
+      throw new AppError("Only video files are allowed", 400);
+    }
+
+    // ✅ delete old video if exists
+    if (student.selfieVideoPublicId) {
+      await handleDelete(student.selfieVideoPublicId);
+    }
+
+    const result = await handleUpload(file.buffer, "video");
+
+    if (!result?.secure_url || !result?.public_id) {
+      throw new AppError("Video upload failed", 400);
+    }
+
+    student.selfieVideo = result.secure_url;
+    student.selfieVideoPublicId = result.public_id;
+
+    await student.save();
+
+    res.status(200).json({
+      message: "Student selfie video updated successfully",
+      user: {
+        id: student.id,
+        fullName: student.fullName,
+        email: student.email,
+        phoneNumber: student.phoneNumber,
+        profileImage: student.profileImage,
+        dob: student.dob,
+        gender: student.gender,
+        selfieVideo: student.selfieVideo,
+        createdAt: student.createdAt,
+        updatedAt: student.updatedAt,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const studentSelfieVideoDelete = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const student = await Student.findOneBy({ id: req.user.id });
+    if (!student) {
+      throw new AppError("Student not found", 404);
+    }
+
+    if (student.selfieVideoPublicId) {
+      try {
+        await handleDelete(student.selfieVideoPublicId);
+      } catch (error) {
+        throw new AppError("Failed to delete previous image", 400);
+      }
+    }
+
+    student.selfieVideo = null;
+    student.selfieVideoPublicId = null;
+
+    await student.save();
+
+    res.status(200).json({
+      message: "Student selfie video deleted successfully",
+      user: student,
+    });
   } catch (error) {
     next(error);
   }
@@ -243,7 +554,7 @@ export const startExam = async (
   next: NextFunction
 ) => {
   try {
-    const { examId } = req.params;
+    const { id: examId } = req.params;
     const studentId = req.user.id; // logged-in student
 
     const exam = await Exam.findOne({
@@ -485,7 +796,6 @@ export const submitExam = async (
     next(err);
   }
 };
-
 
 //frame check endpoint
 export const checkFrame = async (

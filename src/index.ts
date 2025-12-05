@@ -6,6 +6,7 @@ import { Request, Response } from "express";
 import { AppDataSource } from "./data-source";
 import adminRouter from "./routes/admin.routes";
 import studentRouter from "./routes/student.routes";
+import biometricRouter from "./routes/biometric.routes";
 import * as proctoringController from "./controllers/proctoring.controller";
 import { errorHandler } from "./utils/ErrorHandler";
 import cron from "node-cron";
@@ -40,6 +41,7 @@ app.post(
 // API endpoints
 app.use("/api/admin", adminRouter);
 app.use("/api/student", studentRouter);
+app.use("/api/biometric", biometricRouter);
 
 app.get("/{*any}", (req: Request, res: Response) => {
   res.status(404).json({

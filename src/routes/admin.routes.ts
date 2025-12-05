@@ -20,6 +20,7 @@ import {
   getAllExams,
   getExamById,
   getExamAttempts,
+  adminGoogleAuth,
 } from "../controllers/admin.controller";
 import { mediaUpload } from "../config/multer";
 import { authMiddleware } from "../middleware/auth.middleware";
@@ -27,6 +28,7 @@ import { authMiddleware } from "../middleware/auth.middleware";
 const router = express.Router();
 
 router.post("/login", adminLogin);
+router.post("/auth/google", adminGoogleAuth);
 router.post("/logout", adminLogout);
 router.delete("/profile-image", authMiddleware, deleteAdminProfileImage);
 router.post("/register", mediaUpload.single("profileImage"), adminRegister);

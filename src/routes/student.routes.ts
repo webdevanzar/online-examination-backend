@@ -11,25 +11,54 @@ import {
   submitExam,
   checkFrame,
   getAttemptSummary,
+  studentProfileImageUpdate,
+  studentSelfieVideoUpdate,
+  studentProfileUpdate,
+  getMe,
+  studentProfileImageDelete,
+  studentSelfieVideoDelete,
+  studentGoogleAuth,
 } from "../controllers/student.controller";
-import { mediaUpload } from "../config/multer";
 import { authMiddleware } from "../middleware/auth.middleware";
+import { mediaUpload } from "../config/multer";
 
 const router = express.Router();
 
 router.post("/login", studentLogin);
 router.post("/logout", studentLogout);
+router.post("/auth/google", studentGoogleAuth);
+
+// current user profile
+router.get("/me", authMiddleware, getMe);
 
 router.get("/exams/:examId", authMiddleware, getExamQuestions);
 
+router.post("/register", studentRegister);
+
+//profile update
+router.put("/profile", authMiddleware, studentProfileUpdate);
+
+//profile image update
 router.post(
-  "/register",
-  mediaUpload.fields([
-    { name: "image", maxCount: 1 },
-    { name: "video", maxCount: 1 },
-  ]),
-  studentRegister
+  "/profile-image",
+  authMiddleware,
+  mediaUpload.single("profileImage"),
+  studentProfileImageUpdate
 );
+
+//profile image delete
+router.delete("/profile-image", authMiddleware, studentProfileImageDelete);
+
+//selfie video update
+router.post(
+  "/selfie-video",
+  authMiddleware,
+  mediaUpload.single("selfieVideo"),
+  studentSelfieVideoUpdate
+);
+
+//selfie video delete
+router.delete("/selfie-video", authMiddleware, studentSelfieVideoDelete);
 
 //exam start
 router.post("/exams/:id/start", authMiddleware, startExam);
@@ -57,8 +86,6 @@ router.post(
 
 //status
 router.get("/attempt/:attemptId/status", authMiddleware, getAttemptStatus);
-
-
 
 //check frame
 router.post("/attempt/:attemptId/check-frame", authMiddleware, checkFrame);

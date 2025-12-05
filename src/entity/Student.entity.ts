@@ -27,8 +27,15 @@ export class Student extends BaseEntity {
   @Column({ nullable: true })
   phoneNumber!: string;
 
-  @Column("text")
-  password!: string;
+  @Column("text", { nullable: true })
+  password!: string | null;
+
+  @Column({
+    type: "enum",
+    enum: ["local", "google"],
+    default: "local",
+  })
+  provider!: "local" | "google";
 
   @Column({ nullable: true })
   profileImage!: string;
@@ -42,8 +49,9 @@ export class Student extends BaseEntity {
   @Column({
     type: "enum",
     enum: Gender,
+    nullable: true,
   })
-  gender!: Gender;
+  gender!: Gender | null;
 
   @Column({ nullable: true })
   selfieVideo!: string;

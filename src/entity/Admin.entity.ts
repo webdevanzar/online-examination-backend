@@ -18,15 +18,22 @@ export class Admin extends BaseEntity {
   @Column({ unique: true, length: 200 })
   email!: string;
 
-  @Column('text')
-  password!: string;
+  @Column({ type: "text", nullable: true })
+  password!: string | null;
 
-  @Column({ nullable: true }) 
+  @Column({
+    type: "enum",
+    enum: ["local", "google"],
+    default: "local",
+  })
+  provider!: "local" | "google";
+
+  @Column({ nullable: true })
   profileImage!: string;
 
   @Column({ nullable: true })
   profileImagePublicId!: string;
-    
+
   @Column({ default: true })
   isActive!: boolean;
 
