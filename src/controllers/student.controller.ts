@@ -219,6 +219,26 @@ export const getMe = async (
     const id = req.user.id;
     const student = await Student.findOne({ where: { id } });
     if (!student) throw new AppError("Student not found", 404);
+
+    // Auto-backfill: Check if typing profile exists in ML but flag is false
+    if (!student.hasTypingProfile) {
+      try {
+        const KEYSTROKE_ML_URL = process.env.KEYSTROKE_ML_URL || "http://127.0.0.1:8000";
+        const mlResponse = await axios.get(
+          `${KEYSTROKE_ML_URL}/check-model/${id}`,
+          { timeout: 2000 }
+        );
+
+        if (mlResponse.data?.exists) {
+          student.hasTypingProfile = true;
+          await student.save();
+        }
+      } catch (err) {
+        // Silently fail - user will set up profile manually if needed
+        console.log("Backfill check failed:", err);
+      }
+    }
+
     return res.json({
       user: {
         id: student.id,
@@ -229,6 +249,7 @@ export const getMe = async (
         dob: student.dob,
         gender: student.gender,
         selfieVideo: student.selfieVideo,
+        hasTypingProfile: student.hasTypingProfile,
         createdAt: student.createdAt,
         updatedAt: student.updatedAt,
       },
@@ -565,6 +586,14 @@ export const startExam = async (
       );
     }
 
+    // Require typing profile before starting exam
+    if (!student.hasTypingProfile) {
+      throw new AppError(
+        "Please complete your typing profile setup before starting the exam.",
+        403
+      );
+    }
+
     const exam = await Exam.findOne({
       where: { id: examId },
     });
@@ -577,7 +606,7 @@ export const startExam = async (
       throw new AppError("Exam is already ended", 403);
     }
 
-    // Has student already attempted this exam?
+    // Check for existing attempt - no restarts allowed
     let attempt = await ExamAttempt.findOne({
       where: {
         student: { id: studentId },
@@ -586,21 +615,15 @@ export const startExam = async (
       relations: ["answers"],
     });
 
-    // If attempt exists and submitted → cannot restart
-    if (attempt && attempt.isSubmitted) {
-      throw new AppError("You have already finished this exam", 403);
+    // If any attempt exists → REJECT (no restarts allowed)
+    if (attempt) {
+      throw new AppError(
+        "You have already started this exam. Multiple attempts are not allowed.",
+        403
+      );
     }
 
-    // If attempt exists but not submitted → resume
-    if (attempt && !attempt.isSubmitted) {
-      return res.json({
-        message: "Exam resumed",
-        attemptId: attempt.id,
-        startedAt: attempt.startedAt,
-      });
-    }
-
-    // Otherwise create a new attempt
+    // Create new attempt (only if no prior attempt exists)
     attempt = ExamAttempt.create({
       student,
       exam: { id: examId } as any,
@@ -754,6 +777,81 @@ export const getAttemptStatus = async (
   }
 };
 
+// Get exam details by attempt ID
+export const getExamDetailsByAttempt = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { attemptId } = req.params;
+    const studentId = req.user.id;
+
+    // Find attempt with exam and questions
+    const attempt = await ExamAttempt.findOne({
+      where: { id: attemptId },
+      relations: ["exam", "student"],
+    });
+
+    if (!attempt) {
+      throw new AppError("Attempt not found", 404);
+    }
+
+    // Verify student owns this attempt
+    if (attempt.student.id !== studentId) {
+      throw new AppError("Unauthorized access to this exam attempt", 403);
+    }
+
+    // Check if already submitted
+    if (attempt.isSubmitted) {
+      throw new AppError("This exam has already been submitted", 403);
+    }
+
+    const exam = attempt.exam;
+
+    // Fetch questions with options
+    const questions = await Question.find({
+      where: { exam: { id: exam.id } },
+      relations: ["options"],
+      order: { createdAt: "ASC" },
+    });
+
+    // Transform questions to match frontend format
+    const formattedQuestions = questions.map((q) => ({
+      id: q.id,
+      question: q.questionText,
+      type: q.type.toUpperCase(), // "MCQ" or "TYPING"
+      options: q.options?.map((opt) => ({
+        id: opt.id,
+        text: opt.optionText,
+      })),
+      answerMinLength: q.answerMinLength,
+      answerMaxLength: q.answerMaxLength,
+    }));
+
+    return res.json({
+      exam: {
+        id: exam.id,
+        title: exam.title,
+        description: exam.description,
+        duration: exam.duration, // in minutes
+        totalMarks: exam.totalMarks,
+        startTime: exam.startTime,
+        endTime: exam.endTime,
+        questions: formattedQuestions,
+      },
+      attempt: {
+        id: attempt.id,
+        startedAt: attempt.startedAt,
+        warningCount: attempt.warningCount,
+        maxWarnings: attempt.maxWarnings,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 //submit exam
 export const submitExam = async (
   req: Request,
@@ -806,45 +904,46 @@ export const submitExam = async (
 };
 
 //frame check endpoint
-export const checkFrame = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-) => {
-  try {
-    const { attemptId } = req.params;
-    const { frame } = req.body;
+// export const checkFrame = async (
+//   req: Request,
+//   res: Response,
+//   next: NextFunction
+// ) => {
+//   try {
+//     const { attemptId } = req.params;
+//     const { frame } = req.body;
 
-    const fastApiRes = await axios.post("http://127.0.0.1:8000/analyze-frame", {
-      image: frame,
-    });
+//     const fastApiRes = await axios.post("http://127.0.0.1:8000/analyze-frame", {
+//       image: frame,
+//     });
 
-    const fraud = fastApiRes.data.fraud;
+//     const fraud = fastApiRes.data.fraud;
 
-    // Save events
-    for (let f of fraud) {
-      const evt = CheatEvent.create({
-        attempt: { id: attemptId } as any,
-        eventType: f.type,
-        confidence: f.confidence,
-        screenshot: frame,
-      });
-      await evt.save();
-    }
+//     // Save events
+//     for (let f of fraud) {
+//       const evt = CheatEvent.create({
+//         attempt: { id: attemptId } as any,
+//         eventType: f.type,
+//         confidence: f.confidence,
+//         screenshot: frame,
+//       });
+//       await evt.save();
+//     }
 
-    // Auto terminate on severe fraud
-    if (fraud.some((f) => f.isMajor)) {
-      const attempt = await ExamAttempt.findOne({ where: { id: attemptId } });
-      attempt.isSubmitted = true;
-      attempt.submittedAt = new Date();
-      await attempt.save();
-    }
+//     // Auto terminate on severe fraud
+//     if (fraud.some((f) => f.isMajor)) {
+//       const attempt = await ExamAttempt.findOne({ where: { id: attemptId } });
+//       attempt.isSubmitted = true;
+//       attempt.submittedAt = new Date();
+//       await attempt.save();
+//     }
 
-    return res.json(fastApiRes.data);
-  } catch (err) {
-    next(err);
-  }
-};
+//     return res.json(fastApiRes.data);
+//   } catch (err) {
+//     next(err);
+//   }
+// };
+
 
 //get attempt summary
 export const getAttemptSummary = async (
@@ -879,7 +978,6 @@ export const getPublishedExams = async (
     const exams = await Exam.find({
       where: {
         isPublished: true,
-        isActive: true,
       },
       select: [
         "id",
@@ -900,12 +998,8 @@ export const getPublishedExams = async (
       },
     });
 
-    // Filter exams that haven't ended
-    const activeExams = exams.filter(
-      (exam) => new Date(exam.endTime) > now
-    );
 
-    return res.json({ exams: activeExams });
+    return res.json({ exams });
   } catch (err) {
     next(err);
   }

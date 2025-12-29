@@ -64,9 +64,9 @@ export const checkFrame = async (
       });
     }
 
-    // Forward to FastAPI
+    // Forward to FastAPI (Face ML Worker)
     const fastApiUrl =
-      process.env.FASTAPI_URL || "http://127.0.0.1:8000/analyze-frame";
+      process.env.FACE_ML_URL || "http://127.0.0.1:8001/analyze-frame";
     const fastRes = await axios.post(
       fastApiUrl,
       { image: frame },

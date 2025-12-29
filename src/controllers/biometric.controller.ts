@@ -84,6 +84,13 @@ export const enrollKeystrokeForUser = async (
       );
     }
 
+    // Set hasTypingProfile = true after successful enrollment
+    const student = await Student.findOne({ where: { id: userId } });
+    if (student) {
+      student.hasTypingProfile = true;
+      await student.save();
+    }
+
     return res.json({
       success: true,
       message: enrollResponse.data.message || "Keystroke pattern enrolled successfully",
@@ -114,11 +121,37 @@ export const verifyKeystrokeForUser = async (
       });
     }
 
-    const verifyResponse = await axios.post(
-      `${KEYSTROKE_ML_URL}/verify`,
-      { user_id: userId, keystrokes },
-      { timeout: 8000 }
-    );
+    let verifyResponse;
+    try {
+      verifyResponse = await axios.post(
+        `${KEYSTROKE_ML_URL}/verify`,
+        { user_id: userId, keystrokes },
+        { timeout: 8000 }
+      );
+    } catch (mlError: any) {
+      // Handle ML worker errors gracefully
+      if (mlError.response?.status === 400) {
+        const errorMsg = mlError.response?.data?.detail || "Verification failed";
+
+        // If it's a feature mismatch, suggest re-enrollment
+        if (errorMsg.includes("Feature length mismatch")) {
+          return res.json({
+            verified: false,
+            confidence: 0,
+            message: "Your typing profile needs to be updated. Please go to Profile page and update your typing profile.",
+          });
+        }
+
+        return res.json({
+          verified: false,
+          confidence: 0,
+          message: errorMsg,
+        });
+      }
+
+      // For other errors, throw them
+      throw mlError;
+    }
 
     const { authenticated, confidence } = verifyResponse.data;
 
@@ -257,8 +290,27 @@ export const getEnrollmentStatus = async (
 
     return res.json({
       faceEnrolled: attempt.isFaceEnrolled,
-      keystrokeEnrolled: attempt.isKeystrokeEnrolled,
-      canStartExam: attempt.isFaceEnrolled && attempt.isKeystrokeEnrolled,
+      keystrokeEnrolled: true, // Always true (user-level, not attempt-level)
+      canStartExam: attempt.isFaceEnrolled, // Only face required for enrollment
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getTypingProfileStatus = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = (req as any).user.id;
+    const student = await Student.findOne({ where: { id: userId } });
+
+    if (!student) throw new AppError("Student not found", 404);
+
+    return res.json({
+      hasTypingProfile: student.hasTypingProfile,
     });
   } catch (err) {
     next(err);

@@ -8,8 +8,9 @@ import {
   saveAnswer,
   autoSaveAnswers,
   getAttemptStatus,
+  getExamDetailsByAttempt,
   submitExam,
-  checkFrame,
+  // checkFrame,
   getAttemptSummary,
   studentProfileImageUpdate,
   studentSelfieVideoUpdate,
@@ -91,8 +92,11 @@ router.post(
 //status
 router.get("/attempt/:attemptId/status", authMiddleware, getAttemptStatus);
 
+//get exam details by attempt
+router.get("/attempt/:attemptId/exam-details", authMiddleware, getExamDetailsByAttempt);
+
 //check frame
-router.post("/attempt/:attemptId/check-frame", authMiddleware, checkFrame);
+// router.post("/attempt/:attemptId/check-frame", authMiddleware, checkFrame);
 
 //get attempt summary
 router.get("/attempt/:attemptId/summary", authMiddleware, getAttemptSummary);

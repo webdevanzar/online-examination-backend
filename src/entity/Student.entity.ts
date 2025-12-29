@@ -59,6 +59,9 @@ export class Student extends BaseEntity {
   @Column({ nullable: true })
   selfieVideoPublicId!: string;
 
+  @Column({ default: false })
+  hasTypingProfile!: boolean;
+
   @CreateDateColumn()
   createdAt!: Date;
 
