@@ -2,7 +2,9 @@ import { Request, Response, NextFunction } from "express";
 import axios from "axios";
 import { Student } from "../entity/Student.entity";
 import { ExamAttempt } from "../entity/ExamAttempt.entity";
+import { CheatEvent } from "../entity/CheatEvent.entity";
 import { AppError } from "../utils/ErrorHandler";
+import { getIO } from "../socket";
 
 const FACE_ML_URL = process.env.FACE_ML_URL || "http://127.0.0.1:8001";
 const KEYSTROKE_ML_URL = process.env.KEYSTROKE_ML_URL || "http://127.0.0.1:8000";
@@ -91,14 +93,17 @@ export const enrollKeystrokeForUser = async (
   }
 };
 
-// User-centric keystroke verification (no attempt required)
+// User-centric keystroke verification (with optional attempt tracking)
 export const verifyKeystrokeForUser = async (
   req: Request,
   res: Response,
   next: NextFunction
 ) => {
   try {
-    const { keystrokes } = req.body as { keystrokes: unknown[] };
+    const { keystrokes, attemptId } = req.body as {
+      keystrokes: unknown[];
+      attemptId?: string;
+    };
     const userId = (req as any).user.id as string;
 
     if (!keystrokes || !Array.isArray(keystrokes) || keystrokes.length < 20) {
@@ -117,10 +122,75 @@ export const verifyKeystrokeForUser = async (
 
     const { authenticated, confidence } = verifyResponse.data;
 
+    // If attemptId provided and verification failed, log CheatEvent
+    if (attemptId && !authenticated) {
+      const attempt = await ExamAttempt.findOne({
+        where: { id: attemptId },
+      });
+
+      if (attempt && !attempt.isTerminated && !attempt.isSubmitted) {
+        // Create CheatEvent for keystroke mismatch
+        await CheatEvent.create({
+          attempt: { id: attemptId } as any,
+          eventType: "Keystroke pattern mismatch",
+          confidence: 1 - confidence,
+          screenshot: null,
+          severity: "minor",
+          causedWarning: true,
+          causedTermination: false,
+        }).save();
+
+        // Increment warning count
+        attempt.warningCount += 1;
+        await attempt.save();
+
+        const io = getIO();
+
+        // Emit warning to student
+        io.to(`attempt:${attemptId}`).emit("cheat:warning", {
+          type: "keystroke",
+          message: "Keystroke pattern mismatch detected",
+          warningCount: attempt.warningCount,
+          maxWarnings: attempt.maxWarnings,
+        });
+
+        // Emit to admins
+        io.to("admins").emit("cheat:event", {
+          attemptId,
+          eventType: "Keystroke pattern mismatch",
+          severity: "minor",
+          warningCount: attempt.warningCount,
+          maxWarnings: attempt.maxWarnings,
+        });
+
+        // Check if max warnings reached
+        if (attempt.warningCount >= attempt.maxWarnings) {
+          attempt.isTerminated = true;
+          attempt.isSubmitted = true;
+          attempt.submittedAt = new Date();
+          attempt.terminationReason = `Exceeded maximum warnings (${attempt.maxWarnings})`;
+          await attempt.save();
+
+          io.to(`attempt:${attemptId}`).emit("attempt:terminated", {
+            attemptId,
+            reason: attempt.terminationReason,
+            at: new Date(),
+          });
+
+          io.to("admins").emit("attempt:terminated", {
+            attemptId,
+            reason: attempt.terminationReason,
+          });
+        }
+      }
+    }
+
     return res.json({
       verified: authenticated,
       confidence,
-      message: authenticated ? "Keystroke pattern verified" : "Keystroke pattern mismatch detected",
+      message: authenticated
+        ? "Keystroke pattern verified"
+        : "Keystroke pattern mismatch detected",
     });
   } catch (err) {
     next(err);

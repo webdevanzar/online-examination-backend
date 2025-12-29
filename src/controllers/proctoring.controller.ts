@@ -231,3 +231,135 @@ export const terminateAttempt = async (
     next(err);
   }
 };
+
+// Voice violation reporting endpoint
+export const reportVoiceViolation = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { attemptId } = req.params;
+    const { issues, speech_probability, risk_score } = req.body;
+
+    // Validate attempt exists
+    const attempt = await ExamAttempt.findOne({
+      where: { id: attemptId },
+    });
+    if (!attempt) throw new AppError("Attempt not found", 404);
+
+    // Check if already terminated
+    if (attempt.isTerminated || attempt.isSubmitted) {
+      return res.json({
+        ok: false,
+        terminated: true,
+        message: "Exam already terminated or submitted",
+      });
+    }
+
+    // Determine severity based on issues and risk score
+    const isMajor =
+      risk_score > 0.7 ||
+      issues.some(
+        (issue: string) =>
+          issue.includes("sustained_speech") || issue.includes("normal_speech")
+      );
+
+    const severity = isMajor ? "major" : "minor";
+    const eventType = issues.join(", ");
+
+    // Create CheatEvent
+    await CheatEvent.create({
+      attempt: { id: attemptId } as any,
+      eventType: `Voice: ${eventType}`,
+      confidence: speech_probability,
+      screenshot: null,
+      severity: severity,
+      causedWarning: !isMajor,
+      causedTermination: isMajor,
+    }).save();
+
+    const io = getIO();
+
+    // Handle major fraud - immediate termination
+    if (isMajor) {
+      attempt.isTerminated = true;
+      attempt.isSubmitted = true;
+      attempt.submittedAt = new Date();
+      attempt.terminationReason = `Major voice fraud: ${eventType}`;
+      await attempt.save();
+
+      io.to(`attempt:${attemptId}`).emit("attempt:terminated", {
+        attemptId,
+        reason: attempt.terminationReason,
+        at: new Date(),
+      });
+
+      io.to("admins").emit("attempt:terminated", {
+        attemptId,
+        reason: attempt.terminationReason,
+      });
+
+      return res.json({
+        ok: false,
+        terminated: true,
+        reason: attempt.terminationReason,
+      });
+    }
+
+    // Handle minor fraud - warning
+    attempt.warningCount += 1;
+    await attempt.save();
+
+    // Emit warning to student
+    io.to(`attempt:${attemptId}`).emit("cheat:warning", {
+      type: "voice",
+      message: `Voice detected: ${eventType}`,
+      warningCount: attempt.warningCount,
+      maxWarnings: attempt.maxWarnings,
+    });
+
+    // Emit to admins
+    io.to("admins").emit("cheat:event", {
+      attemptId,
+      eventType: `Voice: ${eventType}`,
+      severity: "minor",
+      warningCount: attempt.warningCount,
+      maxWarnings: attempt.maxWarnings,
+    });
+
+    // Check if max warnings reached
+    if (attempt.warningCount >= attempt.maxWarnings) {
+      attempt.isTerminated = true;
+      attempt.isSubmitted = true;
+      attempt.submittedAt = new Date();
+      attempt.terminationReason = `Exceeded maximum warnings (${attempt.maxWarnings})`;
+      await attempt.save();
+
+      io.to(`attempt:${attemptId}`).emit("attempt:terminated", {
+        attemptId,
+        reason: attempt.terminationReason,
+        at: new Date(),
+      });
+
+      io.to("admins").emit("attempt:terminated", {
+        attemptId,
+        reason: attempt.terminationReason,
+      });
+
+      return res.json({
+        ok: false,
+        terminated: true,
+        reason: attempt.terminationReason,
+      });
+    }
+
+    return res.json({
+      ok: true,
+      warningCount: attempt.warningCount,
+      maxWarnings: attempt.maxWarnings,
+    });
+  } catch (err) {
+    next(err);
+  }
+};

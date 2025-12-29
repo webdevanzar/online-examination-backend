@@ -421,26 +421,45 @@ export const createExam = async (
   next: NextFunction
 ) => {
   try {
-    // Validate data
+    // 1️⃣ Validate request body
     const parsed = CreateExamSchema.safeParse(req.body);
     if (!parsed.success) {
       return next(parsed.error);
     }
 
+    if (!req.user?.id) {
+      throw new AppError("Unauthorized", 401);
+    }
+
     const data = parsed.data;
 
-    // compute duration in minutes from start and end
+    // 2️⃣ Load admin entity (CRITICAL)
+    const admin = await Admin.findOne({
+      where: { id: req.user.id },
+    });
+
+    if (!admin) {
+      throw new AppError("Admin not found", 404);
+    }
+
+    // 3️⃣ Compute duration
     const start = new Date(data.startTime);
     const end = new Date(data.endTime);
+
+    if (end <= start) {
+      throw new AppError("End time must be after start time", 400);
+    }
+
     const durationMinutes = Math.max(
       1,
       Math.ceil((end.getTime() - start.getTime()) / (60 * 1000))
     );
 
+    // 4️⃣ Create exam (SAFE)
     const exam = Exam.create({
       ...data,
       duration: durationMinutes,
-      createdBy: { id: req.user.id } as any, // attach admin FK
+      createdBy: admin, // ✅ managed entity
     });
 
     await exam.save();

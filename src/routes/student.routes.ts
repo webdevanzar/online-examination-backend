@@ -18,6 +18,7 @@ import {
   studentProfileImageDelete,
   studentSelfieVideoDelete,
   studentGoogleAuth,
+  getPublishedExams,
 } from "../controllers/student.controller";
 import { authMiddleware } from "../middleware/auth.middleware";
 import { mediaUpload } from "../config/multer";
@@ -30,6 +31,9 @@ router.post("/auth/google", studentGoogleAuth);
 
 // current user profile
 router.get("/me", authMiddleware, getMe);
+
+// get published exams
+router.get("/exams", authMiddleware, getPublishedExams);
 
 router.get("/exams/:examId", authMiddleware, getExamQuestions);
 

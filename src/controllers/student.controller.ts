@@ -557,6 +557,14 @@ export const startExam = async (
     const { id: examId } = req.params;
     const studentId = req.user.id; // logged-in student
 
+    const student = await Student.findOne({ where: { id: studentId } });
+    if (!student) {
+      throw new AppError(
+        "Student not found. Please login again (or your account may have been deleted).",
+        404
+      );
+    }
+
     const exam = await Exam.findOne({
       where: { id: examId },
     });
@@ -594,7 +602,7 @@ export const startExam = async (
 
     // Otherwise create a new attempt
     attempt = ExamAttempt.create({
-      student: { id: studentId } as any,
+      student,
       exam: { id: examId } as any,
       startedAt: new Date(),
       isSubmitted: false,
@@ -853,6 +861,51 @@ export const getAttemptSummary = async (
     if (!attempt) throw new AppError("Attempt not found", 404);
 
     return res.json(attempt);
+  } catch (err) {
+    next(err);
+  }
+};
+
+//get published exams
+export const getPublishedExams = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const now = new Date();
+
+    // Get published exams that are active and within time window
+    const exams = await Exam.find({
+      where: {
+        isPublished: true,
+        isActive: true,
+      },
+      select: [
+        "id",
+        "title",
+        "description",
+        "subject",
+        "startTime",
+        "endTime",
+        "duration",
+        "totalMarks",
+        "passingMarks",
+        "questionCount",
+        "microphoneRequired",
+        "faceDetectionRequired",
+      ],
+      order: {
+        startTime: "ASC",
+      },
+    });
+
+    // Filter exams that haven't ended
+    const activeExams = exams.filter(
+      (exam) => new Date(exam.endTime) > now
+    );
+
+    return res.json({ exams: activeExams });
   } catch (err) {
     next(err);
   }

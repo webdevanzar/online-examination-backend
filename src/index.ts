@@ -3,11 +3,13 @@ import express from "express";
 import dotenv from "dotenv";
 import cookieParser from "cookie-parser";
 import { Request, Response } from "express";
+import http from "http";
 import { AppDataSource } from "./data-source";
 import adminRouter from "./routes/admin.routes";
 import studentRouter from "./routes/student.routes";
 import biometricRouter from "./routes/biometric.routes";
-import * as proctoringController from "./controllers/proctoring.controller";
+import proctoringRouter from "./routes/proctoring.routes";
+import { initSocket } from "./socket";
 import { errorHandler } from "./utils/ErrorHandler";
 import cron from "node-cron";
 import { Exam } from "./entity/Exam.entity";
@@ -31,17 +33,11 @@ app.use(
   })
 );
 
-// Proctoring endpoints
-app.post("/attempt/:attemptId/check-frame", proctoringController.checkFrame);
-app.post(
-  "/attempt/:attemptId/terminate",
-  proctoringController.terminateAttempt
-);
-
 // API endpoints
 app.use("/api/admin", adminRouter);
 app.use("/api/student", studentRouter);
 app.use("/api/biometric", biometricRouter);
+app.use("/api/proctoring", proctoringRouter);
 
 app.get("/{*any}", (req: Request, res: Response) => {
   res.status(404).json({
@@ -53,7 +49,10 @@ app.use(errorHandler);
 
 AppDataSource.initialize()
   .then(async () => {
-    app.listen(PORT, () => {
+    const server = http.createServer(app);
+    initSocket(server);
+
+    server.listen(PORT, () => {
       console.log("Server is running on http://localhost:" + PORT);
     });
     console.log("Data Source has been initialized!");
