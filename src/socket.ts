@@ -45,6 +45,120 @@ export function initSocket(server: HttpServer) {
     socket.on("disconnect", () => {
       // cleanup if needed
     });
+
+    // Handle join event from frontend
+    socket.on("join", (room: string) => {
+      console.log(`Socket ${socket.id} joining room: ${room}`);
+      socket.join(room);
+    });
+
+    // Handle voice detection from ML Worker
+    socket.on("voice:detection", async (data: {
+      attemptId: string;
+      speech_probability: number;
+      issues: string[];
+      risk_score: number;
+    }) => {
+      try {
+        const { attemptId, speech_probability, issues, risk_score } = data;
+
+        const { ExamAttempt } = await import("./entity/ExamAttempt.entity");
+        const { CheatEvent } = await import("./entity/CheatEvent.entity");
+
+        // Validate attempt exists
+        const attempt = await ExamAttempt.findOne({
+          where: { id: attemptId },
+        });
+
+        if (!attempt || attempt.isTerminated || attempt.isSubmitted) {
+          return; // Ignore detections for invalid/ended attempts
+        }
+
+        // Determine severity
+        const isMajor = risk_score > 0.7 || issues.some((issue: string) =>
+          issue.includes("sustained_speech") || issue.includes("normal_speech")
+        );
+
+        const severity = isMajor ? "major" : "minor";
+        const eventType = issues.join(", ");
+
+        // Create CheatEvent
+        await CheatEvent.create({
+          attempt: { id: attemptId } as any,
+          eventType: `Voice: ${eventType}`,
+          confidence: speech_probability,
+          screenshot: null,
+          severity: severity,
+          causedWarning: !isMajor,
+          causedTermination: isMajor,
+        }).save();
+
+        // Handle major fraud - immediate termination
+        if (isMajor) {
+          attempt.isTerminated = true;
+          attempt.isSubmitted = true;
+          attempt.submittedAt = new Date();
+          attempt.terminationReason = `Major voice fraud: ${eventType}`;
+          await attempt.save();
+
+          io?.to(`attempt:${attemptId}`).emit("attempt:terminated", {
+            attemptId,
+            reason: attempt.terminationReason,
+            at: new Date(),
+          });
+
+          io?.to("admins").emit("attempt:terminated", {
+            attemptId,
+            reason: attempt.terminationReason,
+          });
+
+          return;
+        }
+
+        // Handle minor fraud - warning
+        attempt.warningCount += 1;
+        await attempt.save();
+
+        // Emit warning to student
+        io?.to(`attempt:${attemptId}`).emit("cheat:warning", {
+          type: "voice",
+          message: `Voice detected: ${eventType}`,
+          warningCount: attempt.warningCount,
+          maxWarnings: attempt.maxWarnings,
+        });
+
+        // Emit to admins
+        io?.to("admins").emit("cheat:event", {
+          attemptId,
+          eventType: `Voice: ${eventType}`,
+          severity: "minor",
+          warningCount: attempt.warningCount,
+          maxWarnings: attempt.maxWarnings,
+        });
+
+        // Check if max warnings reached
+        if (attempt.warningCount >= attempt.maxWarnings) {
+          attempt.isTerminated = true;
+          attempt.isSubmitted = true;
+          attempt.submittedAt = new Date();
+          attempt.terminationReason = `Exceeded maximum warnings (${attempt.maxWarnings})`;
+          await attempt.save();
+
+          io?.to(`attempt:${attemptId}`).emit("attempt:terminated", {
+            attemptId,
+            reason: attempt.terminationReason,
+            at: new Date(),
+          });
+
+          io?.to("admins").emit("attempt:terminated", {
+            attemptId,
+            reason: attempt.terminationReason,
+          });
+        }
+      } catch (err) {
+        console.error("Voice detection handler error:", err);
+      }
+    });
   });
 
   return io;

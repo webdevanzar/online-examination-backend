@@ -260,6 +260,12 @@ export const verifyFaceForEnrollment = async (
 
     const { verified, confidence, message } = verifyResponse.data;
 
+    // Set isFaceVerified flag if verification succeeds
+    if (verified) {
+      attempt.isFaceVerified = true;
+      await attempt.save();
+    }
+
     return res.json({
       verified,
       confidence,
@@ -291,7 +297,7 @@ export const getEnrollmentStatus = async (
     return res.json({
       faceEnrolled: attempt.isFaceEnrolled,
       keystrokeEnrolled: true, // Always true (user-level, not attempt-level)
-      canStartExam: attempt.isFaceEnrolled, // Only face required for enrollment
+      canStartExam: attempt.isFaceEnrolled && attempt.isFaceVerified, // Requires both enrollment AND verification
     });
   } catch (err) {
     next(err);

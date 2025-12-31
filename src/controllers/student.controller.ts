@@ -606,30 +606,46 @@ export const startExam = async (
       throw new AppError("Exam is already ended", 403);
     }
 
-    // Check for existing attempt - no restarts allowed
+    // Check for existing attempt
     let attempt = await ExamAttempt.findOne({
       where: {
         student: { id: studentId },
         exam: { id: examId },
       },
       relations: ["answers"],
+      order: { createdAt: "DESC" }, // Get most recent attempt
     });
 
-    // If any attempt exists → REJECT (no restarts allowed)
-    if (attempt) {
+    // Block if exam was normally submitted (not terminated)
+    if (attempt && attempt.isSubmitted && !attempt.isTerminated) {
       throw new AppError(
-        "You have already started this exam. Multiple attempts are not allowed.",
+        "You have already completed this exam. Multiple attempts are not allowed.",
         403
       );
     }
 
-    // Create new attempt (only if no prior attempt exists)
+    // Block if exam is still active (not submitted, not terminated)
+    if (attempt && !attempt.isSubmitted && !attempt.isTerminated) {
+      throw new AppError(
+        "You have an active exam session. Please continue or submit it first.",
+        403
+      );
+    }
+
+    // If attempt was terminated OR no attempt exists → ALLOW (create new attempt below)
+
+    // Create new attempt (allowed after termination or first time)
     attempt = ExamAttempt.create({
       student,
       exam: { id: examId } as any,
       startedAt: new Date(),
       isSubmitted: false,
+      isTerminated: false,
+      terminationReason: null,
       score: 0,
+      isFaceEnrolled: false,
+      isFaceVerified: false,
+      warningCount: 0,
     });
 
     await attempt.save();
@@ -651,6 +667,15 @@ export const startExam = async (
     );
 
     await Answer.save(answerEntities);
+
+    // Notify ML Worker to start voice monitoring
+    try {
+      const { getIO } = await import("../socket");
+      const io = getIO();
+      io.emit("voice:start_monitoring", { attemptId: attempt.id });
+    } catch (err) {
+      console.error("Failed to notify ML Worker:", err);
+    }
 
     res.status(201).json({
       message: "Exam started successfully",
@@ -893,6 +918,15 @@ export const submitExam = async (
     attempt.isSubmitted = true;
     attempt.submittedAt = new Date();
     await attempt.save();
+
+    // Notify ML Worker to stop voice monitoring
+    try {
+      const { getIO } = await import("../socket");
+      const io = getIO();
+      io.emit("voice:stop_monitoring", { attemptId });
+    } catch (err) {
+      console.error("Failed to notify ML Worker:", err);
+    }
 
     return res.json({
       message: "Exam submitted successfully",

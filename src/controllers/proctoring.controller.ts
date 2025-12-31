@@ -132,6 +132,9 @@ export const checkFrame = async (
             reason: attempt.terminationReason,
           });
 
+          // Stop voice monitoring
+          io.emit("voice:stop_monitoring", { attemptId });
+
           return res.json({
             ok: false,
             terminated: true,
@@ -170,6 +173,9 @@ export const checkFrame = async (
           attemptId,
           reason: attempt.terminationReason,
         });
+
+        // Stop voice monitoring
+        io.emit("voice:stop_monitoring", { attemptId });
 
         return res.json({
           ok: false,
@@ -225,6 +231,9 @@ export const terminateAttempt = async (
       attemptId,
       reason,
     });
+
+    // Stop voice monitoring
+    io.emit("voice:stop_monitoring", { attemptId });
 
     return res.json({ ok: true, message: "Attempt terminated" });
   } catch (err) {

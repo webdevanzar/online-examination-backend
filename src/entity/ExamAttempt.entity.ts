@@ -52,6 +52,9 @@ export class ExamAttempt extends BaseEntity {
   isFaceEnrolled!: boolean;
 
   @Column({ default: false })
+  isFaceVerified!: boolean;
+
+  @Column({ default: false })
   isKeystrokeEnrolled!: boolean;
 
   @OneToMany(() => Answer, (answer)=> answer.attempt, {cascade: true})

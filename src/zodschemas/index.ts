@@ -82,8 +82,29 @@ export const CreateExamSchema = z
   });
 export type CreateExamSchemaType = z.infer<typeof CreateExamSchema>;
 
-//update exam schema
-export const UpdateExamSchema = CreateExamSchema.partial();
+//update exam schema - remove defaults to prevent overwriting existing values
+export const UpdateExamSchema = z
+  .object({
+    title: z.string().min(3, "Title is required").optional(),
+    description: z.string().optional(),
+    subject: z.string().min(2, "Subject is required").optional(),
+    instructions: z.string().optional(),
+
+    startTime: z.coerce.date().optional(),
+    endTime: z.coerce.date().optional(),
+
+    totalMarks: z.number().min(1).optional(),
+    passingMarks: z.number().min(0).optional(),
+
+    microphoneRequired: z.boolean().optional(),
+    faceDetectionRequired: z.boolean().optional(),
+
+    questionCount: z.number().min(0).optional(),
+
+    isActive: z.boolean().optional(),
+    isPublished: z.boolean().optional(),
+  })
+  .partial();
 export type UpdateExamSchemaType = z.infer<typeof UpdateExamSchema>;
 
 // ---------- OPTION SCHEMA ----------
