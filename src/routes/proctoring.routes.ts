@@ -4,6 +4,7 @@ import {
   checkFrame,
   terminateAttempt,
   reportVoiceViolation,
+  receiveVoiceDetection,
 } from "../controllers/proctoring.controller";
 
 const router = express.Router();
@@ -23,5 +24,9 @@ router.post(
 // Terminate an attempt by admin action
 // Body: { reason?: string }
 router.post("/attempt/:attemptId/terminate", authMiddleware, terminateAttempt);
+
+// Receive voice detection from Voice ML Worker (no auth required - internal service)
+// Body: { attemptId: string, speech_probability: number, issues: string[], risk_score: number }
+router.post("/voice-detection", receiveVoiceDetection);
 
 export default router;

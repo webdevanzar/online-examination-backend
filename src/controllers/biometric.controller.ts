@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import axios from "axios";
 import { Student } from "../entity/Student.entity";
+import { Exam } from "../entity/Exam.entity";
 import { ExamAttempt } from "../entity/ExamAttempt.entity";
 import { CheatEvent } from "../entity/CheatEvent.entity";
 import { AppError } from "../utils/ErrorHandler";
@@ -317,6 +318,115 @@ export const getTypingProfileStatus = async (
 
     return res.json({
       hasTypingProfile: student.hasTypingProfile,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const verifyWithVideo = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { attemptId } = req.params;
+    const { frame } = req.body;
+    const userId = (req as any).user.id;
+
+    // Validate attempt
+    const attempt = await ExamAttempt.findOne({
+      where: { id: attemptId },
+      relations: ["student"],
+    });
+
+    if (!attempt) throw new AppError("Attempt not found", 404);
+    if (attempt.student.id !== userId) throw new AppError("Unauthorized", 403);
+
+    // Get student's selfie video
+    const student = await Student.findOne({ where: { id: userId } });
+    if (!student || !student.selfieVideo) {
+      throw new AppError("Selfie video not found. Please complete registration.", 400);
+    }
+
+    // Call ML worker's /verify-with-video endpoint
+    const verifyResponse = await axios.post(
+      `${FACE_ML_URL}/verify-with-video`,
+      {
+        user_id: userId,
+        video_url: student.selfieVideo,
+        image: frame,
+      },
+      { timeout: 60000 } // Longer timeout since it processes video + frame
+    );
+
+    const { verified, confidence, message, distance, threshold, video_samples } =
+      verifyResponse.data;
+
+    // Set isFaceVerified flag if verification succeeds
+    if (verified) {
+      attempt.isFaceVerified = true;
+      await attempt.save();
+    }
+
+    return res.json({
+      verified,
+      confidence,
+      message,
+      distance,
+      threshold,
+      video_samples,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * NEW: Verify face for exam enrollment (before creating attempt)
+ * This allows verification BEFORE exam attempt is created
+ */
+export const verifyFaceForExam = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { examId, frame } = req.body;
+    const userId = (req as any).user.id;
+
+    // Validate exam exists
+    const exam = await Exam.findOne({ where: { id: examId } });
+    if (!exam) throw new AppError("Exam not found", 404);
+
+    // Get student's selfie video
+    const student = await Student.findOne({ where: { id: userId } });
+    if (!student || !student.selfieVideo) {
+      throw new AppError("Selfie video not found. Please complete registration.", 400);
+    }
+
+    // Call ML worker's /verify-with-video endpoint
+    const verifyResponse = await axios.post(
+      `${FACE_ML_URL}/verify-with-video`,
+      {
+        user_id: userId,
+        video_url: student.selfieVideo,
+        image: frame,
+      },
+      { timeout: 60000 }
+    );
+
+    const { verified, confidence, message, distance, threshold, video_samples } =
+      verifyResponse.data;
+
+    return res.json({
+      verified,
+      confidence,
+      message,
+      distance,
+      threshold,
+      video_samples,
+      examId, // Include examId in response for frontend use
     });
   } catch (err) {
     next(err);

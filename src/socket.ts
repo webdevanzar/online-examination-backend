@@ -17,6 +17,7 @@ export function initSocket(server: HttpServer) {
   io.on("connection", (socket: Socket) => {
     // when admin/client connects, they should send { token, role, attemptId (optional) } via query
     const { token, role, attemptId } = socket.handshake.query as any;
+    console.log(`[SOCKET] Connection from ${socket.id}, role: ${role}, attemptId: ${attemptId}`);
 
     // basic token verification (implement verifyToken function)
     try {
@@ -61,6 +62,7 @@ export function initSocket(server: HttpServer) {
     }) => {
       try {
         const { attemptId, speech_probability, issues, risk_score } = data;
+        console.log(`[VOICE:DETECTION] Event received on socket ${socket.id}:`, data);
 
         const { ExamAttempt } = await import("./entity/ExamAttempt.entity");
         const { CheatEvent } = await import("./entity/CheatEvent.entity");

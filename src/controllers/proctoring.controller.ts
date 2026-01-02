@@ -75,6 +75,12 @@ export const checkFrame = async (
 
     const { fraud_severity, faces, objects, direction } = fastRes.data as any;
 
+    console.log(`[FACE] ML Worker response for ${attemptId}:`, {
+      fraud_severity,
+      faces: faces?.length,
+      objects: objects?.length
+    });
+
     const io = getIO();
 
     // Handle fraud severity
@@ -96,6 +102,10 @@ export const checkFrame = async (
         attempt.warningCount += 1;
         await attempt.save();
 
+        console.log(`[FACE] Emitting cheat:warning to room attempt:${attemptId}`, {
+          warningCount: attempt.warningCount
+        });
+
         // Emit warning to student
         io.to(`attempt:${attemptId}`).emit("cheat:warning", {
           type: "minor",
@@ -113,34 +123,8 @@ export const checkFrame = async (
           maxWarnings: attempt.maxWarnings,
         });
 
-        // Check if max warnings reached
-        if (attempt.warningCount >= attempt.maxWarnings) {
-          attempt.isTerminated = true;
-          attempt.isSubmitted = true;
-          attempt.submittedAt = new Date();
-          attempt.terminationReason = `Exceeded maximum warnings (${attempt.maxWarnings})`;
-          await attempt.save();
-
-          io.to(`attempt:${attemptId}`).emit("attempt:terminated", {
-            attemptId,
-            reason: attempt.terminationReason,
-            at: new Date(),
-          });
-
-          io.to("admins").emit("attempt:terminated", {
-            attemptId,
-            reason: attempt.terminationReason,
-          });
-
-          // Stop voice monitoring
-          io.emit("voice:stop_monitoring", { attemptId });
-
-          return res.json({
-            ok: false,
-            terminated: true,
-            reason: attempt.terminationReason,
-          });
-        }
+        // REMOVED: Auto-termination on max warnings
+        // Warnings are now only for display - exam only terminates on major fraud or manual end
       }
 
       // Handle major frauds - immediate termination
@@ -175,7 +159,15 @@ export const checkFrame = async (
         });
 
         // Stop voice monitoring
-        io.emit("voice:stop_monitoring", { attemptId });
+        try {
+          await axios.post(
+            `${process.env.VOICE_ML_URL || 'http://127.0.0.1:8002'}/voice/stop-monitoring`,
+            { attemptId },
+            { timeout: 3000 }
+          );
+        } catch (err) {
+          console.error("[VOICE] Failed to stop monitoring:", err);
+        }
 
         return res.json({
           ok: false,
@@ -233,7 +225,15 @@ export const terminateAttempt = async (
     });
 
     // Stop voice monitoring
-    io.emit("voice:stop_monitoring", { attemptId });
+    try {
+      await axios.post(
+        `${process.env.VOICE_ML_URL || 'http://127.0.0.1:8002'}/voice/stop-monitoring`,
+        { attemptId },
+        { timeout: 3000 }
+      );
+    } catch (err) {
+      console.error("[VOICE] Failed to stop monitoring:", err);
+    }
 
     return res.json({ ok: true, message: "Attempt terminated" });
   } catch (err) {
@@ -337,13 +337,73 @@ export const reportVoiceViolation = async (
       maxWarnings: attempt.maxWarnings,
     });
 
-    // Check if max warnings reached
-    if (attempt.warningCount >= attempt.maxWarnings) {
+    // REMOVED: Auto-termination on max warnings
+    // Warnings are now only for display - exam only terminates on major fraud or manual end
+
+    return res.json({
+      ok: true,
+      warningCount: attempt.warningCount,
+      maxWarnings: attempt.maxWarnings,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const receiveVoiceDetection = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { attemptId, speech_probability, issues, risk_score } = req.body;
+
+    console.log(`[VOICE-HTTP] Received detection for attempt ${attemptId}:`, {
+      speech_probability,
+      issues,
+      risk_score
+    });
+
+    // Validate attempt exists
+    const attempt = await ExamAttempt.findOne({
+      where: { id: attemptId },
+    });
+
+    if (!attempt || attempt.isTerminated || attempt.isSubmitted) {
+      console.log(`[VOICE-HTTP] Attempt ${attemptId} invalid or ended`);
+      return res.json({ ok: false, message: "Invalid or ended attempt" });
+    }
+
+    // Determine severity
+    const isMajor = risk_score > 0.7 || issues.some((issue: string) =>
+      issue.includes("sustained_speech") || issue.includes("normal_speech")
+    );
+
+    const severity = isMajor ? "major" : "minor";
+    const eventType = issues.join(", ");
+
+    // Create CheatEvent
+    await CheatEvent.create({
+      attempt: { id: attemptId } as any,
+      eventType: `Voice: ${eventType}`,
+      confidence: speech_probability,
+      screenshot: null,
+      severity: severity,
+      causedWarning: !isMajor,
+      causedTermination: isMajor,
+    }).save();
+
+    const io = getIO();
+
+    // Handle major fraud - immediate termination
+    if (isMajor) {
       attempt.isTerminated = true;
       attempt.isSubmitted = true;
       attempt.submittedAt = new Date();
-      attempt.terminationReason = `Exceeded maximum warnings (${attempt.maxWarnings})`;
+      attempt.terminationReason = `Major voice fraud: ${eventType}`;
       await attempt.save();
+
+      console.log(`[VOICE-HTTP] Terminating attempt ${attemptId} - major fraud`);
 
       io.to(`attempt:${attemptId}`).emit("attempt:terminated", {
         attemptId,
@@ -356,19 +416,38 @@ export const reportVoiceViolation = async (
         reason: attempt.terminationReason,
       });
 
-      return res.json({
-        ok: false,
-        terminated: true,
-        reason: attempt.terminationReason,
-      });
+      return res.json({ ok: true, terminated: true });
     }
 
-    return res.json({
-      ok: true,
+    // Handle minor fraud - warning
+    attempt.warningCount += 1;
+    await attempt.save();
+
+    console.log(`[VOICE-HTTP] Emitting warning for attempt ${attemptId}, count: ${attempt.warningCount}`);
+
+    // Emit warning to student
+    io.to(`attempt:${attemptId}`).emit("cheat:warning", {
+      type: "voice",
+      message: `Voice detected: ${eventType}`,
       warningCount: attempt.warningCount,
       maxWarnings: attempt.maxWarnings,
     });
+
+    // Emit to admins
+    io.to("admins").emit("cheat:event", {
+      attemptId,
+      eventType: `Voice: ${eventType}`,
+      severity: "minor",
+      warningCount: attempt.warningCount,
+      maxWarnings: attempt.maxWarnings,
+    });
+
+    // REMOVED: Auto-termination on max warnings
+    // Warnings are now only for display - exam only terminates on major fraud or manual end
+
+    return res.json({ ok: true, warningCount: attempt.warningCount });
   } catch (err) {
+    console.error("[VOICE-HTTP] Error:", err);
     next(err);
   }
 };

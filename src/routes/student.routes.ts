@@ -20,6 +20,7 @@ import {
   studentSelfieVideoDelete,
   studentGoogleAuth,
   getPublishedExams,
+  getExamAttemptStatus,
 } from "../controllers/student.controller";
 import { authMiddleware } from "../middleware/auth.middleware";
 import { mediaUpload } from "../config/multer";
@@ -35,6 +36,9 @@ router.get("/me", authMiddleware, getMe);
 
 // get published exams
 router.get("/exams", authMiddleware, getPublishedExams);
+
+// NEW: Get exam attempt status for a specific exam
+router.get("/exams/:examId/attempt-status", authMiddleware, getExamAttemptStatus);
 
 router.get("/exams/:examId", authMiddleware, getExamQuestions);
 

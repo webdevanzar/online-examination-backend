@@ -670,11 +670,14 @@ export const startExam = async (
 
     // Notify ML Worker to start voice monitoring
     try {
-      const { getIO } = await import("../socket");
-      const io = getIO();
-      io.emit("voice:start_monitoring", { attemptId: attempt.id });
+      await axios.post(
+        `${process.env.VOICE_ML_URL || 'http://127.0.0.1:8002'}/voice/start-monitoring`,
+        { attemptId: attempt.id },
+        { timeout: 3000 }
+      );
+      console.log(`[VOICE] Started monitoring for attempt: ${attempt.id}`);
     } catch (err) {
-      console.error("Failed to notify ML Worker:", err);
+      console.error("[VOICE] Failed to start monitoring:", err);
     }
 
     res.status(201).json({
@@ -730,6 +733,75 @@ export const saveAnswer = async (
     await answer.save();
 
     return res.json({ message: "Answer saved successfully" });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * NEW: Get exam attempt status for a specific exam
+ * Used to check if student has already attempted/submitted an exam
+ */
+export const getExamAttemptStatus = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { examId } = req.params;
+    const studentId = (req as any).user.id;
+
+    // Find most recent attempt for this student and exam
+    const attempt = await ExamAttempt.findOne({
+      where: {
+        student: { id: studentId },
+        exam: { id: examId },
+      },
+      order: { createdAt: "DESC" },
+      relations: ["exam"],
+    });
+
+    // No attempt exists
+    if (!attempt) {
+      return res.json({
+        status: "not_attempted",
+        canStart: true
+      });
+    }
+
+    // Submitted (not terminated) - cannot restart
+    if (attempt.isSubmitted && !attempt.isTerminated) {
+      return res.json({
+        status: "submitted",
+        canStart: false,
+        score: attempt.score,
+        submittedAt: attempt.submittedAt,
+        totalMarks: attempt.exam.totalMarks,
+      });
+    }
+
+    // Terminated - can restart
+    if (attempt.isTerminated) {
+      return res.json({
+        status: "terminated",
+        canStart: true,
+        terminationReason: attempt.terminationReason,
+        warningCount: attempt.warningCount,
+      });
+    }
+
+    // Active/in-progress attempt
+    if (!attempt.isSubmitted && !attempt.isTerminated) {
+      return res.json({
+        status: "in_progress",
+        canStart: false,
+        attemptId: attempt.id,
+        startedAt: attempt.startedAt,
+        message: "Resume existing attempt",
+      });
+    }
+
+    return res.json({ status: "unknown", canStart: false });
   } catch (err) {
     next(err);
   }
@@ -921,11 +993,14 @@ export const submitExam = async (
 
     // Notify ML Worker to stop voice monitoring
     try {
-      const { getIO } = await import("../socket");
-      const io = getIO();
-      io.emit("voice:stop_monitoring", { attemptId });
+      await axios.post(
+        `${process.env.VOICE_ML_URL || 'http://127.0.0.1:8002'}/voice/stop-monitoring`,
+        { attemptId },
+        { timeout: 3000 }
+      );
+      console.log(`[VOICE] Stopped monitoring for attempt: ${attemptId}`);
     } catch (err) {
-      console.error("Failed to notify ML Worker:", err);
+      console.error("[VOICE] Failed to stop monitoring:", err);
     }
 
     return res.json({
