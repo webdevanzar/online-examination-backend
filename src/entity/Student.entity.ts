@@ -62,6 +62,9 @@ export class Student extends BaseEntity {
   @Column({ default: false })
   hasTypingProfile!: boolean;
 
+  @Column({ default: true })
+  isActive!: boolean;
+
   @CreateDateColumn()
   createdAt!: Date;
 

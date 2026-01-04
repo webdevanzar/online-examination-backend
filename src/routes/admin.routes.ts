@@ -21,6 +21,12 @@ import {
   getExamById,
   getExamAttempts,
   adminGoogleAuth,
+  setAttemptStatus,
+  getAttemptReview,
+  gradeAttempt,
+  updateStudent,
+  deleteStudent,
+  resetStudentPassword,
 } from "../controllers/admin.controller";
 import { mediaUpload } from "../config/multer";
 import { authMiddleware } from "../middleware/auth.middleware";
@@ -66,5 +72,13 @@ router.delete("/questions/:questionId", authMiddleware, deleteQuestion);
 // Attempt management routes
 router.post("/attempts/:attemptId/terminate", authMiddleware, terminateAttempt);
 router.post("/attempts/:attemptId/cheat-events", authMiddleware, logCheatEvent);
+router.post("/attempts/:attemptId/set-status", authMiddleware, setAttemptStatus);
+router.get("/attempts/:attemptId/review", authMiddleware, getAttemptReview);
+router.post("/attempts/:attemptId/grade", authMiddleware, gradeAttempt);
+
+// Student CRUD routes
+router.put("/students/:studentId", authMiddleware, updateStudent);
+router.delete("/students/:studentId", authMiddleware, deleteStudent);
+router.post("/students/:studentId/reset-password", authMiddleware, resetStudentPassword);
 
 export default router;

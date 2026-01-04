@@ -12,6 +12,7 @@ import {
 import { Student } from "./Student.entity";
 import { Exam } from "./Exam.entity";
 import { Answer } from "./Answer.entity";
+import { Admin } from "./Admin.entity";
 
 @Entity({ name: "exam_attempts" })
 export class ExamAttempt extends BaseEntity {
@@ -56,6 +57,19 @@ export class ExamAttempt extends BaseEntity {
 
   @Column({ default: false })
   isKeystrokeEnrolled!: boolean;
+
+  @Column({
+    type: "enum",
+    enum: ["PASS", "FAIL"],
+    nullable: true,
+  })
+  manualStatus!: "PASS" | "FAIL" | null;
+
+  @ManyToOne(() => Admin, { nullable: true })
+  gradedBy!: Admin | null;
+
+  @Column({ type: "timestamp", nullable: true })
+  gradedAt!: Date | null;
 
   @OneToMany(() => Answer, (answer)=> answer.attempt, {cascade: true})
   answers!: Answer[];

@@ -48,15 +48,21 @@ export const checkFrame = async (
     const { attemptId } = req.params;
     const { frame } = req.body; // expected base64 PNG/JPEG dataurl e.g. "data:image/jpeg;base64,...."
 
+    console.log(`[FACE-HTTP] Received frame check request for attempt ${attemptId}`);
+
     // Validate attempt exists
     const attempt = await ExamAttempt.findOne({
       where: { id: attemptId },
       relations: ["student"],
     });
-    if (!attempt) throw new AppError("Attempt not found", 404);
+    if (!attempt) {
+      console.log(`[FACE-HTTP] Attempt ${attemptId} not found`);
+      throw new AppError("Attempt not found", 404);
+    }
 
     // Check if already terminated
     if (attempt.isTerminated || attempt.isSubmitted) {
+      console.log(`[FACE-HTTP] Attempt ${attemptId} invalid or ended (terminated: ${attempt.isTerminated}, submitted: ${attempt.isSubmitted})`);
       return res.json({
         ok: false,
         terminated: true,
@@ -65,20 +71,34 @@ export const checkFrame = async (
     }
 
     // Forward to FastAPI (Face ML Worker)
-    const fastApiUrl =
+    // Accept either:
+    // - FACE_ML_URL=http://127.0.0.1:8001
+    // - FACE_ML_URL=http://127.0.0.1:8001/analyze-frame
+    // and normalize to the final analyze endpoint.
+    const rawFaceMlUrl =
       process.env.FACE_ML_URL || "http://127.0.0.1:8001/analyze-frame";
+    const fastApiUrl = rawFaceMlUrl.includes("/analyze-frame")
+      ? rawFaceMlUrl
+      : `${rawFaceMlUrl.replace(/\/+$/, "")}/analyze-frame`;
+
+    console.log(`[FACE-HTTP] Forwarding to ML Worker at ${fastApiUrl}`);
+
     const fastRes = await axios.post(
       fastApiUrl,
       { image: frame },
       { timeout: 5000 }
-    );
+    ).catch((error) => {
+      console.error(`[FACE-HTTP] ML Worker error:`, error.message);
+      throw new AppError("Face ML Worker unavailable", 503);
+    });
 
     const { fraud_severity, faces, objects, direction } = fastRes.data as any;
 
     console.log(`[FACE] ML Worker response for ${attemptId}:`, {
       fraud_severity,
       faces: faces?.length,
-      objects: objects?.length
+      objects: objects?.length,
+      direction
     });
 
     const io = getIO();
@@ -103,7 +123,8 @@ export const checkFrame = async (
         await attempt.save();
 
         console.log(`[FACE] Emitting cheat:warning to room attempt:${attemptId}`, {
-          warningCount: attempt.warningCount
+          warningCount: attempt.warningCount,
+          message: fraud_severity.minor.join(", ")
         });
 
         // Emit warning to student
@@ -113,6 +134,8 @@ export const checkFrame = async (
           warningCount: attempt.warningCount,
           maxWarnings: attempt.maxWarnings,
         });
+
+        console.log(`[FACE] Socket event emitted successfully`);
 
         // Emit to admins
         io.to("admins").emit("cheat:event", {
@@ -141,38 +164,20 @@ export const checkFrame = async (
           }).save();
         }
 
-        attempt.isTerminated = true;
-        attempt.isSubmitted = true;
-        attempt.submittedAt = new Date();
-        attempt.terminationReason = `Major fraud detected: ${fraud_severity.major.join(", ")}`;
-        await attempt.save();
-
-        io.to(`attempt:${attemptId}`).emit("attempt:terminated", {
-          attemptId,
-          reason: attempt.terminationReason,
-          at: new Date(),
+        // NOTE: For testing, do NOT auto-terminate on major fraud. Emit warning only.
+        io.to(`attempt:${attemptId}`).emit("cheat:warning", {
+          type: "major",
+          message: `Major fraud detected: ${fraud_severity.major.join(", ")}`,
+          warningCount: attempt.warningCount,
+          maxWarnings: attempt.maxWarnings,
         });
 
-        io.to("admins").emit("attempt:terminated", {
+        io.to("admins").emit("cheat:event", {
           attemptId,
-          reason: attempt.terminationReason,
-        });
-
-        // Stop voice monitoring
-        try {
-          await axios.post(
-            `${process.env.VOICE_ML_URL || 'http://127.0.0.1:8002'}/voice/stop-monitoring`,
-            { attemptId },
-            { timeout: 3000 }
-          );
-        } catch (err) {
-          console.error("[VOICE] Failed to stop monitoring:", err);
-        }
-
-        return res.json({
-          ok: false,
-          terminated: true,
-          reason: attempt.terminationReason,
+          eventType: fraud_severity.major.join(", "),
+          severity: "major",
+          warningCount: attempt.warningCount,
+          maxWarnings: attempt.maxWarnings,
         });
       }
     }
@@ -285,34 +290,32 @@ export const reportVoiceViolation = async (
       screenshot: null,
       severity: severity,
       causedWarning: !isMajor,
-      causedTermination: isMajor,
+      causedTermination: false,
     }).save();
 
     const io = getIO();
 
-    // Handle major fraud - immediate termination
+    // NOTE: For testing, do NOT auto-terminate on major voice fraud. Emit warning only.
     if (isMajor) {
-      attempt.isTerminated = true;
-      attempt.isSubmitted = true;
-      attempt.submittedAt = new Date();
-      attempt.terminationReason = `Major voice fraud: ${eventType}`;
-      await attempt.save();
-
-      io.to(`attempt:${attemptId}`).emit("attempt:terminated", {
-        attemptId,
-        reason: attempt.terminationReason,
-        at: new Date(),
+      io.to(`attempt:${attemptId}`).emit("cheat:warning", {
+        type: "voice",
+        message: `Major voice fraud detected: ${eventType}`,
+        warningCount: attempt.warningCount,
+        maxWarnings: attempt.maxWarnings,
       });
 
-      io.to("admins").emit("attempt:terminated", {
+      io.to("admins").emit("cheat:event", {
         attemptId,
-        reason: attempt.terminationReason,
+        eventType: `Voice: ${eventType}`,
+        severity: "major",
+        warningCount: attempt.warningCount,
+        maxWarnings: attempt.maxWarnings,
       });
 
       return res.json({
-        ok: false,
-        terminated: true,
-        reason: attempt.terminationReason,
+        ok: true,
+        warningCount: attempt.warningCount,
+        maxWarnings: attempt.maxWarnings,
       });
     }
 
@@ -390,33 +393,31 @@ export const receiveVoiceDetection = async (
       screenshot: null,
       severity: severity,
       causedWarning: !isMajor,
-      causedTermination: isMajor,
+      causedTermination: false,
     }).save();
 
     const io = getIO();
 
-    // Handle major fraud - immediate termination
+    // NOTE: For testing, do NOT auto-terminate on major voice fraud. Emit warning only.
     if (isMajor) {
-      attempt.isTerminated = true;
-      attempt.isSubmitted = true;
-      attempt.submittedAt = new Date();
-      attempt.terminationReason = `Major voice fraud: ${eventType}`;
-      await attempt.save();
+      console.log(`[VOICE-HTTP] Major fraud detected for attempt ${attemptId} (no auto-terminate in testing)`);
 
-      console.log(`[VOICE-HTTP] Terminating attempt ${attemptId} - major fraud`);
-
-      io.to(`attempt:${attemptId}`).emit("attempt:terminated", {
-        attemptId,
-        reason: attempt.terminationReason,
-        at: new Date(),
+      io.to(`attempt:${attemptId}`).emit("cheat:warning", {
+        type: "voice",
+        message: `Major voice fraud detected: ${eventType}`,
+        warningCount: attempt.warningCount,
+        maxWarnings: attempt.maxWarnings,
       });
 
-      io.to("admins").emit("attempt:terminated", {
+      io.to("admins").emit("cheat:event", {
         attemptId,
-        reason: attempt.terminationReason,
+        eventType: `Voice: ${eventType}`,
+        severity: "major",
+        warningCount: attempt.warningCount,
+        maxWarnings: attempt.maxWarnings,
       });
 
-      return res.json({ ok: true, terminated: true });
+      return res.json({ ok: true });
     }
 
     // Handle minor fraud - warning

@@ -161,3 +161,37 @@ export const LogCheatEventSchema = z.object({
   screenshot: z.string().optional(),
 });
 export type LogCheatEventSchemaType = z.infer<typeof LogCheatEventSchema>;
+
+// ---------- MANUAL GRADING ----------
+export const SetAttemptStatusSchema = z.object({
+  status: z.enum(["PASS", "FAIL"]),
+});
+export type SetAttemptStatusSchemaType = z.infer<typeof SetAttemptStatusSchema>;
+
+export const GradeAttemptSchema = z.object({
+  answers: z
+    .array(
+      z.object({
+        questionId: z.string().min(1),
+        marksObtained: z.number().min(0),
+      })
+    )
+    .min(1),
+});
+export type GradeAttemptSchemaType = z.infer<typeof GradeAttemptSchema>;
+
+// ---------- UPDATE STUDENT (ADMIN) ----------
+export const UpdateStudentSchema = z.object({
+  fullName: z.string().min(3, "Full name must be at least 3 characters").optional(),
+  email: z.email({ message: "Invalid email address" }).optional(),
+  phoneNumber: z.string().optional(),
+  gender: z.nativeEnum(Gender).optional(),
+  dob: z.coerce.date().optional(),
+});
+export type UpdateStudentSchemaType = z.infer<typeof UpdateStudentSchema>;
+
+// ---------- ADMIN RESET PASSWORD ----------
+export const AdminResetPasswordSchema = z.object({
+  newPassword: passwordSchema,
+});
+export type AdminResetPasswordSchemaType = z.infer<typeof AdminResetPasswordSchema>;

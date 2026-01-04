@@ -2,15 +2,19 @@ import { NextFunction, Request, Response } from "express";
 import {
   AdminRegisterSchema,
   AdminRegisterSchemaType,
+  AdminResetPasswordSchema,
   CreateExamSchema,
   CreateQuestionSchema,
   LoginSchema,
   LoginSchemaType,
   LogCheatEventSchema,
+  GradeAttemptSchema,
+  SetAttemptStatusSchema,
   UpdateAdminSchema,
   UpdateAdminSchemaType,
   UpdateExamSchema,
   UpdateQuestionSchema,
+  UpdateStudentSchema,
 } from "../zodschemas";
 import { Admin } from "../entity/Admin.entity";
 import { AppError } from "../utils/ErrorHandler";
@@ -895,6 +899,7 @@ export const getAllStudents = async (
 ) => {
   try {
     const students = await Student.find({
+      where: { isActive: true },
       select: [
         "id",
         "fullName",
@@ -1015,11 +1020,313 @@ export const getExamAttempts = async (
 
     const attempts = await ExamAttempt.find({
       where: { exam: { id: examId } },
-      relations: ["student", "exam"],
+      relations: ["student", "exam", "gradedBy"],
       order: { startedAt: "DESC" },
     });
 
     res.json(attempts);
+  } catch (err) {
+    next(err);
+  }
+};
+
+// =================== SET MANUAL ATTEMPT STATUS ===================
+export const setAttemptStatus = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { attemptId } = req.params;
+    const adminId = req.user.id;
+
+    const parsed = SetAttemptStatusSchema.safeParse(req.body);
+    if (!parsed.success) return next(parsed.error);
+
+    const { status } = parsed.data;
+
+    const attempt = await ExamAttempt.findOne({
+      where: { id: attemptId },
+      relations: ["student", "exam", "gradedBy"],
+    });
+
+    if (!attempt) throw new AppError("Attempt not found", 404);
+    if (!attempt.isSubmitted) throw new AppError("Cannot grade unsubmitted attempt", 400);
+
+    const admin = await Admin.findOne({ where: { id: adminId } });
+    if (!admin) throw new AppError("Admin not found", 404);
+
+    attempt.manualStatus = status;
+    attempt.gradedBy = admin;
+    attempt.gradedAt = new Date();
+
+    await attempt.save();
+
+    res.json({
+      message: `Attempt marked as ${status}`,
+      attempt: {
+        id: attempt.id,
+        manualStatus: attempt.manualStatus,
+        gradedBy: {
+          id: admin.id,
+          fullName: admin.fullName,
+        },
+        gradedAt: attempt.gradedAt,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getAttemptReview = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { attemptId } = req.params;
+
+    const attempt = await ExamAttempt.findOne({
+      where: { id: attemptId },
+      relations: [
+        "student",
+        "exam",
+        "answers",
+        "answers.question",
+        "answers.selectedOption",
+        "answers.question.options",
+      ],
+    });
+
+    if (!attempt) throw new AppError("Attempt not found", 404);
+    if (!attempt.isSubmitted) {
+      throw new AppError("Cannot review an unsubmitted attempt", 400);
+    }
+
+    const questionReviews = attempt.answers
+      .sort((a, b) => {
+        const aOrder = (a.question as any)?.order ?? 0;
+        const bOrder = (b.question as any)?.order ?? 0;
+        return aOrder - bOrder;
+      })
+      .map((ans) => {
+        const q = ans.question;
+        const options = (q.options || []).map((opt) => ({
+          id: opt.id,
+          text: opt.optionText,
+          isCorrect: opt.isCorrect,
+        }));
+
+        return {
+          answerId: ans.id,
+          questionId: q.id,
+          type: q.type,
+          questionText: q.questionText,
+          marks: q.marks,
+          hasMultipleCorrect: q.hasMultipleCorrect,
+          options,
+          studentAnswer: {
+            selectedOptionId: ans.selectedOption?.id ?? null,
+            writtenAnswer: ans.writtenAnswer ?? null,
+          },
+          marksObtained: ans.marksObtained,
+        };
+      });
+
+    return res.json({
+      attempt: {
+        id: attempt.id,
+        startedAt: attempt.startedAt,
+        submittedAt: attempt.submittedAt,
+        score: attempt.score,
+        manualStatus: attempt.manualStatus,
+        gradedAt: attempt.gradedAt,
+        student: {
+          id: attempt.student.id,
+          fullName: attempt.student.fullName,
+          email: attempt.student.email,
+        },
+        exam: {
+          id: attempt.exam.id,
+          title: attempt.exam.title,
+          totalMarks: attempt.exam.totalMarks,
+          passingMarks: attempt.exam.passingMarks,
+        },
+      },
+      questions: questionReviews,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const gradeAttempt = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { attemptId } = req.params;
+    const adminId = req.user.id;
+
+    const parsed = GradeAttemptSchema.safeParse(req.body);
+    if (!parsed.success) return next(parsed.error);
+
+    const attempt = await ExamAttempt.findOne({
+      where: { id: attemptId },
+      relations: ["exam", "student", "answers", "answers.question"],
+    });
+
+    if (!attempt) throw new AppError("Attempt not found", 404);
+    if (!attempt.isSubmitted) {
+      throw new AppError("Cannot grade an unsubmitted attempt", 400);
+    }
+
+    const admin = await Admin.findOne({ where: { id: adminId } });
+    if (!admin) throw new AppError("Admin not found", 404);
+
+    const updatesByQuestionId = new Map(
+      parsed.data.answers.map((a) => [a.questionId, a.marksObtained])
+    );
+
+    let newScore = 0;
+
+    for (const ans of attempt.answers) {
+      const q = ans.question;
+      const nextMarks = updatesByQuestionId.get(q.id);
+
+      if (nextMarks !== undefined) {
+        if (nextMarks > q.marks) {
+          throw new AppError(
+            `Marks for question ${q.id} cannot exceed question max marks (${q.marks})`,
+            400
+          );
+        }
+        ans.marksObtained = nextMarks;
+        await ans.save();
+      }
+
+      newScore += ans.marksObtained;
+    }
+
+    attempt.score = newScore;
+    attempt.gradedBy = admin;
+    attempt.gradedAt = new Date();
+    await attempt.save();
+
+    return res.json({
+      message: "Attempt graded successfully",
+      attempt: {
+        id: attempt.id,
+        score: attempt.score,
+        gradedAt: attempt.gradedAt,
+        gradedBy: {
+          id: admin.id,
+          fullName: admin.fullName,
+        },
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// =================== UPDATE STUDENT ===================
+export const updateStudent = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { studentId } = req.params;
+
+    const parsed = UpdateStudentSchema.safeParse(req.body);
+    if (!parsed.success) return next(parsed.error);
+
+    const data = parsed.data;
+
+    const student = await Student.findOne({ where: { id: studentId } });
+    if (!student) throw new AppError("Student not found", 404);
+
+    // Check email uniqueness
+    if (data.email && data.email !== student.email) {
+      const existing = await Student.findOne({ where: { email: data.email } });
+      if (existing) throw new AppError("Email already in use", 409);
+    }
+
+    Object.assign(student, data);
+    await student.save();
+
+    res.json({
+      message: "Student updated successfully",
+      student: {
+        id: student.id,
+        fullName: student.fullName,
+        email: student.email,
+        phoneNumber: student.phoneNumber,
+        gender: student.gender,
+        dob: student.dob,
+        profileImage: student.profileImage,
+        updatedAt: student.updatedAt,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// =================== DELETE STUDENT (SOFT DELETE) ===================
+export const deleteStudent = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { studentId } = req.params;
+
+    const student = await Student.findOne({ where: { id: studentId } });
+    if (!student) throw new AppError("Student not found", 404);
+
+    if (!student.isActive) {
+      throw new AppError("Student already deleted", 400);
+    }
+
+    student.isActive = false;
+    await student.save();
+
+    res.json({ message: "Student deleted successfully" });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// =================== RESET STUDENT PASSWORD ===================
+export const resetStudentPassword = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { studentId } = req.params;
+
+    const parsed = AdminResetPasswordSchema.safeParse(req.body);
+    if (!parsed.success) return next(parsed.error);
+
+    const { newPassword } = parsed.data;
+
+    const student = await Student.findOne({ where: { id: studentId } });
+    if (!student) throw new AppError("Student not found", 404);
+
+    if (student.provider === "google") {
+      throw new AppError("Cannot reset password for Google-authenticated accounts", 400);
+    }
+
+    const hashedPassword = await hashPassword(newPassword);
+    student.password = hashedPassword;
+    await student.save();
+
+    res.json({ message: "Password reset successfully" });
   } catch (err) {
     next(err);
   }

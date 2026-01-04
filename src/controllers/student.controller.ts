@@ -1061,12 +1061,25 @@ export const getAttemptSummary = async (
   next: NextFunction
 ) => {
   try {
+    const studentId = req.user.id;
+
     const attempt = await ExamAttempt.findOne({
       where: { id: req.params.attemptId },
-      relations: ["answers", "answers.question", "answers.selectedOption"],
+      relations: [
+        "student",
+        "exam",
+        "answers",
+        "answers.question",
+        "answers.question.options",
+        "answers.selectedOption",
+      ],
     });
 
     if (!attempt) throw new AppError("Attempt not found", 404);
+
+    if (attempt.student?.id !== studentId) {
+      throw new AppError("Unauthorized access to this attempt", 403);
+    }
 
     return res.json(attempt);
   } catch (err) {

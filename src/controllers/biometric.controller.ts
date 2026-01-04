@@ -196,26 +196,7 @@ export const verifyKeystrokeForUser = async (
           warningCount: attempt.warningCount,
           maxWarnings: attempt.maxWarnings,
         });
-
-        // Check if max warnings reached
-        if (attempt.warningCount >= attempt.maxWarnings) {
-          attempt.isTerminated = true;
-          attempt.isSubmitted = true;
-          attempt.submittedAt = new Date();
-          attempt.terminationReason = `Exceeded maximum warnings (${attempt.maxWarnings})`;
-          await attempt.save();
-
-          io.to(`attempt:${attemptId}`).emit("attempt:terminated", {
-            attemptId,
-            reason: attempt.terminationReason,
-            at: new Date(),
-          });
-
-          io.to("admins").emit("attempt:terminated", {
-            attemptId,
-            reason: attempt.terminationReason,
-          });
-        }
+        // NOTE: For testing, do NOT auto-terminate based on warning count.
       }
     }
 

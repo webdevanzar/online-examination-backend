@@ -95,23 +95,21 @@ export function initSocket(server: HttpServer) {
           causedTermination: isMajor,
         }).save();
 
-        // Handle major fraud - immediate termination
+        // NOTE: For testing, do NOT auto-terminate on major voice fraud.
         if (isMajor) {
-          attempt.isTerminated = true;
-          attempt.isSubmitted = true;
-          attempt.submittedAt = new Date();
-          attempt.terminationReason = `Major voice fraud: ${eventType}`;
-          await attempt.save();
-
-          io?.to(`attempt:${attemptId}`).emit("attempt:terminated", {
-            attemptId,
-            reason: attempt.terminationReason,
-            at: new Date(),
+          io?.to(`attempt:${attemptId}`).emit("cheat:warning", {
+            type: "voice",
+            message: `Major voice fraud detected: ${eventType}`,
+            warningCount: attempt.warningCount,
+            maxWarnings: attempt.maxWarnings,
           });
 
-          io?.to("admins").emit("attempt:terminated", {
+          io?.to("admins").emit("cheat:event", {
             attemptId,
-            reason: attempt.terminationReason,
+            eventType: `Voice: ${eventType}`,
+            severity: "major",
+            warningCount: attempt.warningCount,
+            maxWarnings: attempt.maxWarnings,
           });
 
           return;
@@ -137,26 +135,7 @@ export function initSocket(server: HttpServer) {
           warningCount: attempt.warningCount,
           maxWarnings: attempt.maxWarnings,
         });
-
-        // Check if max warnings reached
-        if (attempt.warningCount >= attempt.maxWarnings) {
-          attempt.isTerminated = true;
-          attempt.isSubmitted = true;
-          attempt.submittedAt = new Date();
-          attempt.terminationReason = `Exceeded maximum warnings (${attempt.maxWarnings})`;
-          await attempt.save();
-
-          io?.to(`attempt:${attemptId}`).emit("attempt:terminated", {
-            attemptId,
-            reason: attempt.terminationReason,
-            at: new Date(),
-          });
-
-          io?.to("admins").emit("attempt:terminated", {
-            attemptId,
-            reason: attempt.terminationReason,
-          });
-        }
+        // NOTE: For testing, do NOT auto-terminate based on warning count.
       } catch (err) {
         console.error("Voice detection handler error:", err);
       }
