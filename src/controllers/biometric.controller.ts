@@ -114,7 +114,7 @@ export const verifyKeystrokeForUser = async (
     };
     const userId = (req as any).user.id as string;
 
-    if (!keystrokes || !Array.isArray(keystrokes) || keystrokes.length < 20) {
+    if (!keystrokes || !Array.isArray(keystrokes) || keystrokes.length < 60) {
       return res.json({
         verified: false,
         confidence: 0,
