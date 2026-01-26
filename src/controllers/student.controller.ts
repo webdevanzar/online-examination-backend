@@ -1126,3 +1126,88 @@ export const getPublishedExams = async (
     next(err);
   }
 };
+
+// Get exam history for the logged-in student
+export const getExamHistory = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const studentId = req.user.id;
+
+    // Get all submitted attempts for this student
+    const attempts = await ExamAttempt.find({
+      where: {
+        student: { id: studentId },
+        isSubmitted: true,
+      },
+      relations: ["exam", "answers", "answers.question"],
+      order: {
+        submittedAt: "DESC",
+      },
+    });
+
+    // Calculate statistics
+    const totalExams = attempts.length;
+    const passedExams = attempts.filter((attempt) => {
+      const passingMarks = attempt.exam.passingMarks;
+      return attempt.score >= passingMarks;
+    }).length;
+
+    const avgScore =
+      totalExams > 0
+        ? Math.round(
+            attempts.reduce((sum, attempt) => {
+              const percentage = (attempt.score / attempt.exam.totalMarks) * 100;
+              return sum + percentage;
+            }, 0) / totalExams
+          )
+        : 0;
+
+    // Format history items
+    const history = attempts.map((attempt) => {
+      const exam = attempt.exam;
+      const scorePercentage = Math.round((attempt.score / exam.totalMarks) * 100);
+      const isPassed = attempt.score >= exam.passingMarks;
+
+      // Calculate correct answers (for MCQ only)
+      const totalQuestions = attempt.answers.length;
+      const correctAnswers = attempt.answers.filter(
+        (ans) => ans.marksObtained > 0
+      ).length;
+
+      return {
+        id: attempt.id,
+        examId: exam.id,
+        title: exam.title,
+        subject: exam.subject,
+        status: isPassed ? "Passed" : "Failed",
+        date: attempt.submittedAt,
+        startedAt: attempt.startedAt,
+        duration: exam.duration,
+        score: scorePercentage,
+        marksObtained: attempt.score,
+        totalMarks: exam.totalMarks,
+        passingMarks: exam.passingMarks,
+        correct: correctAnswers,
+        total: totalQuestions,
+        isTerminated: attempt.isTerminated,
+        terminationReason: attempt.terminationReason,
+        warningCount: attempt.warningCount,
+      };
+    });
+
+    return res.json({
+      summary: {
+        totalExams,
+        passed: passedExams,
+        failed: totalExams - passedExams,
+        avgScore,
+      },
+      history,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
