@@ -185,8 +185,9 @@ export const UpdateStudentSchema = z.object({
   fullName: z.string().min(3, "Full name must be at least 3 characters").optional(),
   email: z.email({ message: "Invalid email address" }).optional(),
   phoneNumber: z.string().optional(),
-  gender: z.nativeEnum(Gender).optional(),
+  gender: z.enum(Gender).optional(),
   dob: z.coerce.date().optional(),
+  isActive: z.boolean().optional(),
 });
 export type UpdateStudentSchemaType = z.infer<typeof UpdateStudentSchema>;
 

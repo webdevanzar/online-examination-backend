@@ -899,7 +899,7 @@ export const getAllStudents = async (
 ) => {
   try {
     const students = await Student.find({
-      where: { isActive: true },
+      // where: { isActive: true },
       select: [
         "id",
         "fullName",
@@ -907,6 +907,7 @@ export const getAllStudents = async (
         "phoneNumber",
         "profileImage",
         "dob",
+        "isActive",
         "gender",
         "selfieVideo",
         "createdAt",
@@ -938,6 +939,7 @@ export const getStudentById = async (
         "phoneNumber",
         "profileImage",
         "dob",
+        "isActive",
         "gender",
         "selfieVideo",
         "createdAt",
@@ -1025,6 +1027,23 @@ export const getExamAttempts = async (
     });
 
     res.json(attempts);
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const getAllAttempts = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const attempts = await ExamAttempt.find({
+      relations: ["student", "exam", "gradedBy"],
+      order: { startedAt: "DESC" },
+    });
+
+    return res.json(attempts);
   } catch (err) {
     next(err);
   }

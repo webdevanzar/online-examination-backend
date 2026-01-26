@@ -20,6 +20,7 @@ import {
   getAllExams,
   getExamById,
   getExamAttempts,
+  getAllAttempts,
   adminGoogleAuth,
   setAttemptStatus,
   getAttemptReview,
@@ -61,6 +62,9 @@ router.post("/exams", authMiddleware, createExam);
 router.get("/exams/:examId", authMiddleware, getExamById);
 router.get("/exams/:examId/questions", authMiddleware, getExamQuestions);
 router.get("/exams/:examId/attempts", authMiddleware, getExamAttempts);
+
+// Attempts list (across all exams)
+router.get("/attempts", authMiddleware, getAllAttempts);
 router.put("/exams/:examId", authMiddleware, updateExam);
 router.delete("/exams/:examId", authMiddleware, deleteExam);
 
