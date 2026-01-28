@@ -2,6 +2,8 @@ import {
   Entity,
   PrimaryGeneratedColumn,
   ManyToOne,
+  ManyToMany,
+  JoinTable,
   Column,
   BaseEntity,
   CreateDateColumn,
@@ -26,8 +28,9 @@ export class Answer extends BaseEntity {
   question!: Question;
 
   // ----- For MCQ -----
-  @ManyToOne(() => Option, { nullable: true })
-  selectedOption!: Option;
+  @ManyToMany(() => Option)
+  @JoinTable()
+  selectedOptions!: Option[];
 
   // ----- For Writing -----
   @Column({ type: "text", nullable: true })

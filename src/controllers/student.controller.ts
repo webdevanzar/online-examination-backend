@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from "express";
+import { In } from "typeorm";
 import {
   LoginSchema,
   LoginSchemaType,
@@ -24,7 +25,7 @@ const GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo";
 export const studentLogin = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     // Validate request body
@@ -48,7 +49,7 @@ export const studentLogin = async (
     if (student.provider === "google") {
       throw new AppError(
         "This email is registered with google. Please use google login.",
-        409
+        409,
       );
     }
 
@@ -120,7 +121,7 @@ export const studentLogin = async (
 export const studentGoogleAuth = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const { accessToken, rememberMe } = req.body;
@@ -149,7 +150,7 @@ export const studentGoogleAuth = async (
     if (student && student.provider === "local") {
       throw new AppError(
         "This email is registered with password. Please use normal login.",
-        409
+        409,
       );
     }
 
@@ -213,7 +214,7 @@ export const studentGoogleAuth = async (
 export const getMe = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const id = req.user.id;
@@ -223,10 +224,11 @@ export const getMe = async (
     // Auto-backfill: Check if typing profile exists in ML but flag is false
     if (!student.hasTypingProfile) {
       try {
-        const KEYSTROKE_ML_URL = process.env.KEYSTROKE_ML_URL || "http://127.0.0.1:8000";
+        const KEYSTROKE_ML_URL =
+          process.env.KEYSTROKE_ML_URL || "http://127.0.0.1:8000";
         const mlResponse = await axios.get(
           `${KEYSTROKE_ML_URL}/check-model/${id}`,
-          { timeout: 2000 }
+          { timeout: 2000 },
         );
 
         if (mlResponse.data?.exists) {
@@ -262,7 +264,7 @@ export const getMe = async (
 export const studentLogout = (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const accessToken = req.cookies?.accessToken;
@@ -293,7 +295,7 @@ export const studentLogout = (
 export const studentRegister = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const parsedResult = RegisterSchema.safeParse(req.body);
@@ -330,7 +332,7 @@ export const studentRegister = async (
 export const studentProfileUpdate = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const id = req.user.id;
@@ -370,7 +372,7 @@ export const studentProfileUpdate = async (
 export const studentProfileImageUpdate = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const id = req.user.id;
@@ -428,7 +430,7 @@ export const studentProfileImageUpdate = async (
 export const studentProfileImageDelete = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const student = await Student.findOneBy({ id: req.user.id });
@@ -461,7 +463,7 @@ export const studentProfileImageDelete = async (
 export const studentSelfieVideoUpdate = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const id = req.user.id;
@@ -519,7 +521,7 @@ export const studentSelfieVideoUpdate = async (
 export const studentSelfieVideoDelete = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const student = await Student.findOneBy({ id: req.user.id });
@@ -552,7 +554,7 @@ export const studentSelfieVideoDelete = async (
 export const getExamQuestions = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const { examId } = req.params;
@@ -572,7 +574,7 @@ export const getExamQuestions = async (
 export const startExam = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const { id: examId } = req.params;
@@ -582,7 +584,7 @@ export const startExam = async (
     if (!student) {
       throw new AppError(
         "Student not found. Please login again (or your account may have been deleted).",
-        404
+        404,
       );
     }
 
@@ -590,7 +592,7 @@ export const startExam = async (
     if (!student.hasTypingProfile) {
       throw new AppError(
         "Please complete your typing profile setup before starting the exam.",
-        403
+        403,
       );
     }
 
@@ -620,7 +622,7 @@ export const startExam = async (
     if (attempt && attempt.isSubmitted && !attempt.isTerminated) {
       throw new AppError(
         "You have already completed this exam. Multiple attempts are not allowed.",
-        403
+        403,
       );
     }
 
@@ -628,7 +630,7 @@ export const startExam = async (
     if (attempt && !attempt.isSubmitted && !attempt.isTerminated) {
       throw new AppError(
         "You have an active exam session. Please continue or submit it first.",
-        403
+        403,
       );
     }
 
@@ -660,10 +662,10 @@ export const startExam = async (
       Answer.create({
         attempt: attempt,
         question: q,
-        selectedOption: null,
+        selectedOptions: [],
         writtenAnswer: null,
         marksObtained: 0,
-      })
+      }),
     );
 
     await Answer.save(answerEntities);
@@ -671,9 +673,9 @@ export const startExam = async (
     // Notify ML Worker to start voice monitoring
     try {
       await axios.post(
-        `${process.env.VOICE_ML_URL || 'http://127.0.0.1:8002'}/voice/start-monitoring`,
+        `${process.env.VOICE_ML_URL || "http://127.0.0.1:8002"}/voice/start-monitoring`,
         { attemptId: attempt.id },
-        { timeout: 3000 }
+        { timeout: 3000 },
       );
       console.log(`[VOICE] Started monitoring for attempt: ${attempt.id}`);
     } catch (err) {
@@ -694,7 +696,7 @@ export const startExam = async (
 export const saveAnswer = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const { attemptId } = req.params;
@@ -707,7 +709,7 @@ export const saveAnswer = async (
         "exam",
         "answers",
         "answers.question",
-        "answers.selectedOption",
+        "answers.selectedOptions",
       ],
     });
 
@@ -719,15 +721,19 @@ export const saveAnswer = async (
     if (!answer) throw new AppError("Answer row not found", 404);
 
     // update based on question type
-    if (selectedOptionId) {
-      const opt = await Option.findOne({ where: { id: selectedOptionId } });
-      answer.selectedOption = opt;
+    if (
+      selectedOptionId ||
+      (req.body.selectedOptionIds && req.body.selectedOptionIds.length > 0)
+    ) {
+      const ids = req.body.selectedOptionIds || [selectedOptionId];
+      const opts = await Option.find({ where: { id: In(ids) } });
+      answer.selectedOptions = opts;
       answer.writtenAnswer = null;
     }
 
     if (writtenAnswer !== undefined) {
       answer.writtenAnswer = writtenAnswer;
-      answer.selectedOption = null;
+      answer.selectedOptions = [];
     }
 
     await answer.save();
@@ -745,7 +751,7 @@ export const saveAnswer = async (
 export const getExamAttemptStatus = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const { examId } = req.params;
@@ -765,7 +771,7 @@ export const getExamAttemptStatus = async (
     if (!attempt) {
       return res.json({
         status: "not_attempted",
-        canStart: true
+        canStart: true,
       });
     }
 
@@ -810,7 +816,7 @@ export const getExamAttemptStatus = async (
 export const autoSaveAnswers = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const { attemptId } = req.params;
@@ -818,7 +824,7 @@ export const autoSaveAnswers = async (
 
     const attempt = await ExamAttempt.findOne({
       where: { id: attemptId },
-      relations: ["answers", "answers.question"],
+      relations: ["answers", "answers.question", "answers.selectedOptions"],
     });
 
     if (!attempt) throw new AppError("Attempt not found", 404);
@@ -826,21 +832,25 @@ export const autoSaveAnswers = async (
 
     for (let ans of answers) {
       const saveRow = attempt.answers.find(
-        (a) => a.question.id === ans.questionId
+        (a) => a.question.id === ans.questionId,
       );
       if (!saveRow) continue;
 
-      if (ans.selectedOptionId) {
-        const opt = await Option.findOne({
-          where: { id: ans.selectedOptionId },
+      if (
+        ans.selectedOptionId ||
+        (ans.selectedOptionIds && ans.selectedOptionIds.length > 0)
+      ) {
+        const ids = ans.selectedOptionIds || [ans.selectedOptionId];
+        const opts = await Option.find({
+          where: { id: In(ids) },
         });
-        saveRow.selectedOption = opt;
+        saveRow.selectedOptions = opts;
         saveRow.writtenAnswer = null;
       }
 
       if (ans.writtenAnswer !== undefined) {
         saveRow.writtenAnswer = ans.writtenAnswer;
-        saveRow.selectedOption = null;
+        saveRow.selectedOptions = [];
       }
 
       await saveRow.save();
@@ -856,7 +866,7 @@ export const autoSaveAnswers = async (
 export const getAttemptStatus = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const attempt = await ExamAttempt.findOne({
@@ -878,7 +888,7 @@ export const getAttemptStatus = async (
 export const getExamDetailsByAttempt = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const { attemptId } = req.params;
@@ -918,6 +928,7 @@ export const getExamDetailsByAttempt = async (
       id: q.id,
       question: q.questionText,
       type: q.type.toUpperCase(), // "MCQ" or "TYPING"
+      hasMultipleCorrect: q.hasMultipleCorrect,
       options: q.options?.map((opt) => ({
         id: opt.id,
         text: opt.optionText,
@@ -953,14 +964,19 @@ export const getExamDetailsByAttempt = async (
 export const submitExam = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const { attemptId } = req.params;
 
     const attempt = await ExamAttempt.findOne({
       where: { id: attemptId },
-      relations: ["answers", "answers.question", "answers.selectedOption"],
+      relations: [
+        "answers",
+        "answers.question",
+        "answers.selectedOptions",
+        "answers.question.options",
+      ],
     });
 
     if (!attempt) throw new AppError("Attempt not found", 404);
@@ -972,9 +988,28 @@ export const submitExam = async (
       const q = ans.question;
 
       if (q.type === "mcq") {
-        if (ans.selectedOption?.isCorrect) {
-          ans.marksObtained = q.marks;
-          totalScore += q.marks;
+        const correctOptions = q.options.filter((o) => o.isCorrect);
+        const selectedOptions = ans.selectedOptions;
+
+        if (q.hasMultipleCorrect) {
+          // Both must have same count and all IDs must match
+          const correctIds = correctOptions.map((o) => o.id).sort();
+          const selectedIds = selectedOptions.map((o) => o.id).sort();
+
+          const isCorrect =
+            correctIds.length === selectedIds.length &&
+            correctIds.every((id, idx) => id === selectedIds[idx]);
+
+          if (isCorrect) {
+            ans.marksObtained = q.marks;
+            totalScore += q.marks;
+          }
+        } else {
+          // Standard single choice
+          if (selectedOptions.length === 1 && selectedOptions[0].isCorrect) {
+            ans.marksObtained = q.marks;
+            totalScore += q.marks;
+          }
         }
       }
 
@@ -994,9 +1029,9 @@ export const submitExam = async (
     // Notify ML Worker to stop voice monitoring
     try {
       await axios.post(
-        `${process.env.VOICE_ML_URL || 'http://127.0.0.1:8002'}/voice/stop-monitoring`,
+        `${process.env.VOICE_ML_URL || "http://127.0.0.1:8002"}/voice/stop-monitoring`,
         { attemptId },
-        { timeout: 3000 }
+        { timeout: 3000 },
       );
       console.log(`[VOICE] Stopped monitoring for attempt: ${attemptId}`);
     } catch (err) {
@@ -1053,12 +1088,11 @@ export const submitExam = async (
 //   }
 // };
 
-
 //get attempt summary
 export const getAttemptSummary = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const studentId = req.user.id;
@@ -1071,7 +1105,7 @@ export const getAttemptSummary = async (
         "answers",
         "answers.question",
         "answers.question.options",
-        "answers.selectedOption",
+        "answers.selectedOptions",
       ],
     });
 
@@ -1091,7 +1125,7 @@ export const getAttemptSummary = async (
 export const getPublishedExams = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const now = new Date();
@@ -1120,7 +1154,6 @@ export const getPublishedExams = async (
       },
     });
 
-
     return res.json({ exams });
   } catch (err) {
     next(err);
@@ -1131,7 +1164,7 @@ export const getPublishedExams = async (
 export const getExamHistory = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const studentId = req.user.id;
@@ -1159,22 +1192,25 @@ export const getExamHistory = async (
       totalExams > 0
         ? Math.round(
             attempts.reduce((sum, attempt) => {
-              const percentage = (attempt.score / attempt.exam.totalMarks) * 100;
+              const percentage =
+                (attempt.score / attempt.exam.totalMarks) * 100;
               return sum + percentage;
-            }, 0) / totalExams
+            }, 0) / totalExams,
           )
         : 0;
 
     // Format history items
     const history = attempts.map((attempt) => {
       const exam = attempt.exam;
-      const scorePercentage = Math.round((attempt.score / exam.totalMarks) * 100);
+      const scorePercentage = Math.round(
+        (attempt.score / exam.totalMarks) * 100,
+      );
       const isPassed = attempt.score >= exam.passingMarks;
 
       // Calculate correct answers (for MCQ only)
       const totalQuestions = attempt.answers.length;
       const correctAnswers = attempt.answers.filter(
-        (ans) => ans.marksObtained > 0
+        (ans) => ans.marksObtained > 0,
       ).length;
 
       return {

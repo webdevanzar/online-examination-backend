@@ -9,7 +9,7 @@ import { AppError } from "../utils/ErrorHandler";
 async function saveAndEmitCheatEvents(
   attemptId: string,
   frameBase64: string,
-  detections: any[]
+  detections: any[],
 ) {
   // detections expected from FastAPI, adapt keys accordingly
   // e.g. detections = [{ type: "multiple_faces", confidence: 0.9, isMajor: true }, ...]
@@ -42,13 +42,15 @@ async function saveAndEmitCheatEvents(
 export const checkFrame = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const { attemptId } = req.params;
     const { frame } = req.body; // expected base64 PNG/JPEG dataurl e.g. "data:image/jpeg;base64,...."
 
-    console.log(`[FACE-HTTP] Received frame check request for attempt ${attemptId}`);
+    console.log(
+      `[FACE-HTTP] Received frame check request for attempt ${attemptId}`,
+    );
 
     // Validate attempt exists
     const attempt = await ExamAttempt.findOne({
@@ -62,7 +64,9 @@ export const checkFrame = async (
 
     // Check if already terminated
     if (attempt.isTerminated || attempt.isSubmitted) {
-      console.log(`[FACE-HTTP] Attempt ${attemptId} invalid or ended (terminated: ${attempt.isTerminated}, submitted: ${attempt.isSubmitted})`);
+      console.log(
+        `[FACE-HTTP] Attempt ${attemptId} invalid or ended (terminated: ${attempt.isTerminated}, submitted: ${attempt.isSubmitted})`,
+      );
       return res.json({
         ok: false,
         terminated: true,
@@ -83,14 +87,12 @@ export const checkFrame = async (
 
     console.log(`[FACE-HTTP] Forwarding to ML Worker at ${fastApiUrl}`);
 
-    const fastRes = await axios.post(
-      fastApiUrl,
-      { image: frame },
-      { timeout: 5000 }
-    ).catch((error) => {
-      console.error(`[FACE-HTTP] ML Worker error:`, error.message);
-      throw new AppError("Face ML Worker unavailable", 503);
-    });
+    const fastRes = await axios
+      .post(fastApiUrl, { image: frame }, { timeout: 5000 })
+      .catch((error) => {
+        console.error(`[FACE-HTTP] ML Worker error:`, error.message);
+        throw new AppError("Face ML Worker unavailable", 503);
+      });
 
     const { fraud_severity, faces, objects, direction } = fastRes.data as any;
 
@@ -98,7 +100,7 @@ export const checkFrame = async (
       fraud_severity,
       faces: faces?.length,
       objects: objects?.length,
-      direction
+      direction,
     });
 
     const io = getIO();
@@ -122,10 +124,13 @@ export const checkFrame = async (
         attempt.warningCount += 1;
         await attempt.save();
 
-        console.log(`[FACE] Emitting cheat:warning to room attempt:${attemptId}`, {
-          warningCount: attempt.warningCount,
-          message: fraud_severity.minor.join(", ")
-        });
+        console.log(
+          `[FACE] Emitting cheat:warning to room attempt:${attemptId}`,
+          {
+            warningCount: attempt.warningCount,
+            message: fraud_severity.minor.join(", "),
+          },
+        );
 
         // Emit warning to student
         io.to(`attempt:${attemptId}`).emit("cheat:warning", {
@@ -133,6 +138,8 @@ export const checkFrame = async (
           message: fraud_severity.minor.join(", "),
           warningCount: attempt.warningCount,
           maxWarnings: attempt.maxWarnings,
+          faces, // Added faces
+          objects, // Added objects
         });
 
         console.log(`[FACE] Socket event emitted successfully`);
@@ -199,7 +206,7 @@ export const checkFrame = async (
 export const terminateAttempt = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const { attemptId } = req.params;
@@ -232,9 +239,9 @@ export const terminateAttempt = async (
     // Stop voice monitoring
     try {
       await axios.post(
-        `${process.env.VOICE_ML_URL || 'http://127.0.0.1:8002'}/voice/stop-monitoring`,
+        `${process.env.VOICE_ML_URL || "http://127.0.0.1:8002"}/voice/stop-monitoring`,
         { attemptId },
-        { timeout: 3000 }
+        { timeout: 3000 },
       );
     } catch (err) {
       console.error("[VOICE] Failed to stop monitoring:", err);
@@ -250,7 +257,7 @@ export const terminateAttempt = async (
 export const reportVoiceViolation = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const { attemptId } = req.params;
@@ -276,7 +283,7 @@ export const reportVoiceViolation = async (
       risk_score > 0.7 ||
       issues.some(
         (issue: string) =>
-          issue.includes("sustained_speech") || issue.includes("normal_speech")
+          issue.includes("sustained_speech") || issue.includes("normal_speech"),
       );
 
     const severity = isMajor ? "major" : "minor";
@@ -356,7 +363,7 @@ export const reportVoiceViolation = async (
 export const receiveVoiceDetection = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const { attemptId, speech_probability, issues, risk_score } = req.body;
@@ -364,7 +371,7 @@ export const receiveVoiceDetection = async (
     console.log(`[VOICE-HTTP] Received detection for attempt ${attemptId}:`, {
       speech_probability,
       issues,
-      risk_score
+      risk_score,
     });
 
     // Validate attempt exists
@@ -378,9 +385,12 @@ export const receiveVoiceDetection = async (
     }
 
     // Determine severity
-    const isMajor = risk_score > 0.7 || issues.some((issue: string) =>
-      issue.includes("sustained_speech") || issue.includes("normal_speech")
-    );
+    const isMajor =
+      risk_score > 0.7 ||
+      issues.some(
+        (issue: string) =>
+          issue.includes("sustained_speech") || issue.includes("normal_speech"),
+      );
 
     const severity = isMajor ? "major" : "minor";
     const eventType = issues.join(", ");
@@ -400,7 +410,9 @@ export const receiveVoiceDetection = async (
 
     // NOTE: For testing, do NOT auto-terminate on major voice fraud. Emit warning only.
     if (isMajor) {
-      console.log(`[VOICE-HTTP] Major fraud detected for attempt ${attemptId} (no auto-terminate in testing)`);
+      console.log(
+        `[VOICE-HTTP] Major fraud detected for attempt ${attemptId} (no auto-terminate in testing)`,
+      );
 
       io.to(`attempt:${attemptId}`).emit("cheat:warning", {
         type: "voice",
@@ -424,7 +436,9 @@ export const receiveVoiceDetection = async (
     attempt.warningCount += 1;
     await attempt.save();
 
-    console.log(`[VOICE-HTTP] Emitting warning for attempt ${attemptId}, count: ${attempt.warningCount}`);
+    console.log(
+      `[VOICE-HTTP] Emitting warning for attempt ${attemptId}, count: ${attempt.warningCount}`,
+    );
 
     // Emit warning to student
     io.to(`attempt:${attemptId}`).emit("cheat:warning", {

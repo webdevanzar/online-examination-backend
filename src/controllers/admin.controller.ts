@@ -36,7 +36,7 @@ const GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo";
 export const adminLogin = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     // Validate request body
@@ -60,7 +60,7 @@ export const adminLogin = async (
     if (admin.provider === "google") {
       throw new AppError(
         "This email is registered with google. Please use google login.",
-        409
+        409,
       );
     }
 
@@ -120,7 +120,7 @@ export const adminLogin = async (
 export const adminGoogleAuth = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const { accessToken, rememberMe } = req.body;
@@ -136,11 +136,7 @@ export const adminGoogleAuth = async (
       },
     });
 
-    const {
-      email,
-      name: fullName,
-      picture,
-    } = data;
+    const { email, name: fullName, picture } = data;
 
     if (!email) {
       throw new AppError("Google account has no email", 400);
@@ -153,7 +149,7 @@ export const adminGoogleAuth = async (
     if (admin && admin.provider === "local") {
       throw new AppError(
         "This email is registered with password. Please use normal login.",
-        409
+        409,
       );
     }
 
@@ -219,7 +215,7 @@ export const adminGoogleAuth = async (
 export const adminLogout = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const accessToken = req.cookies?.accessToken;
@@ -242,7 +238,7 @@ export const adminLogout = async (
 export const adminRegister = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const parsedResult = AdminRegisterSchema.safeParse(req.body);
@@ -299,7 +295,7 @@ export const adminRegister = async (
 export const adminProfileUpdate = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const parsedResult = UpdateAdminSchema.safeParse(req.body);
@@ -335,7 +331,7 @@ export const adminProfileUpdate = async (
 export const addAdminProfileImage = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const admin = await Admin.findOneBy({ id: req.user.id });
@@ -389,7 +385,7 @@ export const addAdminProfileImage = async (
 export const deleteAdminProfileImage = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const admin = await Admin.findOneBy({ id: req.user.id });
@@ -422,7 +418,7 @@ export const deleteAdminProfileImage = async (
 export const createExam = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     // 1️⃣ Validate request body
@@ -456,7 +452,7 @@ export const createExam = async (
 
     const durationMinutes = Math.max(
       1,
-      Math.ceil((end.getTime() - start.getTime()) / (60 * 1000))
+      Math.ceil((end.getTime() - start.getTime()) / (60 * 1000)),
     );
 
     // 4️⃣ Create exam (SAFE)
@@ -480,7 +476,7 @@ export const createExam = async (
 export const getExamQuestions = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const examId = req.params.examId;
@@ -499,7 +495,7 @@ export const getExamQuestions = async (
 export const updateExam = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     // Validate input
@@ -563,7 +559,7 @@ export const updateExam = async (
       });
       const assignedMarks = questions.reduce(
         (sum, q) => sum + (q.marks || 0),
-        0
+        0,
       );
       const targetTotal =
         data.totalMarks !== undefined ? data.totalMarks : exam.totalMarks;
@@ -574,7 +570,7 @@ export const updateExam = async (
           remaining > 0
             ? `Cannot publish. Remaining marks to assign: ${remaining}`
             : `Cannot publish. Assigned marks (${assignedMarks}) exceed total marks (${targetTotal}).`,
-          400
+          400,
         );
       }
     }
@@ -599,7 +595,7 @@ export const updateExam = async (
           NotificationProfile.create({
             notification,
             student: { id: s.id } as any,
-          })
+          }),
         );
         await NotificationProfile.save(profiles);
       }
@@ -617,7 +613,7 @@ export const updateExam = async (
 export const deleteExam = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const examId = req.params.examId;
@@ -654,7 +650,7 @@ export const deleteExam = async (
 export const createQuestion = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const examId = req.params.examId;
@@ -687,7 +683,7 @@ export const createQuestion = async (
         } which exceeds exam total marks of ${
           exam.totalMarks
         }. Remaining marks: ${exam.totalMarks - currentTotalMarks}`,
-        400
+        400,
       );
     }
 
@@ -711,7 +707,7 @@ export const createQuestion = async (
           question,
           optionText: opt.optionText,
           isCorrect: opt.isCorrect,
-        })
+        }),
       );
 
       await Option.save(optionEntities);
@@ -735,7 +731,7 @@ export const createQuestion = async (
 export const updateQuestion = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const questionId = req.params.questionId;
@@ -772,7 +768,7 @@ export const updateQuestion = async (
           }. Available marks for this question: ${
             exam.totalMarks - otherQuestionsMarks
           }`,
-          400
+          400,
         );
       }
     }
@@ -790,7 +786,7 @@ export const updateQuestion = async (
           question,
           optionText: opt.optionText,
           isCorrect: opt.isCorrect,
-        })
+        }),
       );
 
       await Option.save(newOptions);
@@ -819,7 +815,7 @@ export const updateQuestion = async (
 export const deleteQuestion = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const questionId = req.params.questionId;
@@ -840,7 +836,7 @@ export const deleteQuestion = async (
 export const terminateAttempt = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const attempt = await ExamAttempt.findOne({
@@ -863,7 +859,7 @@ export const terminateAttempt = async (
 export const logCheatEvent = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const { attemptId } = req.params;
@@ -895,7 +891,7 @@ export const logCheatEvent = async (
 export const getAllStudents = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const students = await Student.find({
@@ -925,7 +921,7 @@ export const getAllStudents = async (
 export const getStudentById = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const { studentId } = req.params;
@@ -961,7 +957,7 @@ export const getStudentById = async (
 export const getAllExams = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const exams = await Exam.find({
@@ -985,7 +981,7 @@ export const getAllExams = async (
 export const getExamById = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const { examId } = req.params;
@@ -1015,7 +1011,7 @@ export const getExamById = async (
 export const getExamAttempts = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const { examId } = req.params;
@@ -1035,7 +1031,7 @@ export const getExamAttempts = async (
 export const getAllAttempts = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const attempts = await ExamAttempt.find({
@@ -1053,7 +1049,7 @@ export const getAllAttempts = async (
 export const setAttemptStatus = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const { attemptId } = req.params;
@@ -1070,7 +1066,8 @@ export const setAttemptStatus = async (
     });
 
     if (!attempt) throw new AppError("Attempt not found", 404);
-    if (!attempt.isSubmitted) throw new AppError("Cannot grade unsubmitted attempt", 400);
+    if (!attempt.isSubmitted)
+      throw new AppError("Cannot grade unsubmitted attempt", 400);
 
     const admin = await Admin.findOne({ where: { id: adminId } });
     if (!admin) throw new AppError("Admin not found", 404);
@@ -1101,7 +1098,7 @@ export const setAttemptStatus = async (
 export const getAttemptReview = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const { attemptId } = req.params;
@@ -1113,7 +1110,7 @@ export const getAttemptReview = async (
         "exam",
         "answers",
         "answers.question",
-        "answers.selectedOption",
+        "answers.selectedOptions",
         "answers.question.options",
       ],
     });
@@ -1146,7 +1143,7 @@ export const getAttemptReview = async (
           hasMultipleCorrect: q.hasMultipleCorrect,
           options,
           studentAnswer: {
-            selectedOptionId: ans.selectedOption?.id ?? null,
+            selectedOptionIds: ans.selectedOptions?.map((o) => o.id) ?? [],
             writtenAnswer: ans.writtenAnswer ?? null,
           },
           marksObtained: ans.marksObtained,
@@ -1183,7 +1180,7 @@ export const getAttemptReview = async (
 export const gradeAttempt = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const { attemptId } = req.params;
@@ -1206,7 +1203,7 @@ export const gradeAttempt = async (
     if (!admin) throw new AppError("Admin not found", 404);
 
     const updatesByQuestionId = new Map(
-      parsed.data.answers.map((a) => [a.questionId, a.marksObtained])
+      parsed.data.answers.map((a) => [a.questionId, a.marksObtained]),
     );
 
     let newScore = 0;
@@ -1219,7 +1216,7 @@ export const gradeAttempt = async (
         if (nextMarks > q.marks) {
           throw new AppError(
             `Marks for question ${q.id} cannot exceed question max marks (${q.marks})`,
-            400
+            400,
           );
         }
         ans.marksObtained = nextMarks;
@@ -1255,7 +1252,7 @@ export const gradeAttempt = async (
 export const updateStudent = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const { studentId } = req.params;
@@ -1299,7 +1296,7 @@ export const updateStudent = async (
 export const deleteStudent = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const { studentId } = req.params;
@@ -1324,7 +1321,7 @@ export const deleteStudent = async (
 export const resetStudentPassword = async (
   req: Request,
   res: Response,
-  next: NextFunction
+  next: NextFunction,
 ) => {
   try {
     const { studentId } = req.params;
@@ -1338,7 +1335,10 @@ export const resetStudentPassword = async (
     if (!student) throw new AppError("Student not found", 404);
 
     if (student.provider === "google") {
-      throw new AppError("Cannot reset password for Google-authenticated accounts", 400);
+      throw new AppError(
+        "Cannot reset password for Google-authenticated accounts",
+        400,
+      );
     }
 
     const hashedPassword = await hashPassword(newPassword);
