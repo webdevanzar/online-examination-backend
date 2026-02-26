@@ -20,8 +20,7 @@ const app = express();
 const { PORT = 3000 } = process.env;
 app.use(express.json({ limit: "8mb" })); // frames can be big
 app.use(cookieParser());
-// ... your other middlewares (auth, cookie parser, cors)
-// Middleware
+
 app.use(
   cors({
     origin: [

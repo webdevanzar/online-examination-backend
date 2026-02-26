@@ -228,7 +228,7 @@ export const getMe = async (
           process.env.KEYSTROKE_ML_URL || "http://127.0.0.1:8000";
         const mlResponse = await axios.get(
           `${KEYSTROKE_ML_URL}/check-model/${id}`,
-          { timeout: 2000 },
+          { timeout: 180000 },
         );
 
         if (mlResponse.data?.exists) {
@@ -588,14 +588,6 @@ export const startExam = async (
       );
     }
 
-    // Require typing profile before starting exam
-    if (!student.hasTypingProfile) {
-      throw new AppError(
-        "Please complete your typing profile setup before starting the exam.",
-        403,
-      );
-    }
-
     const exam = await Exam.findOne({
       where: { id: examId },
     });
@@ -675,7 +667,7 @@ export const startExam = async (
       await axios.post(
         `${process.env.VOICE_ML_URL || "http://127.0.0.1:8002"}/voice/start-monitoring`,
         { attemptId: attempt.id },
-        { timeout: 3000 },
+        { timeout: 180000 },
       );
       console.log(`[VOICE] Started monitoring for attempt: ${attempt.id}`);
     } catch (err) {
@@ -725,7 +717,15 @@ export const saveAnswer = async (
       selectedOptionId ||
       (req.body.selectedOptionIds && req.body.selectedOptionIds.length > 0)
     ) {
-      const ids = req.body.selectedOptionIds || [selectedOptionId];
+      const rawIds: string[] = req.body.selectedOptionIds || [selectedOptionId];
+      const UUID_REGEX =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const ids = rawIds.filter((id) => UUID_REGEX.test(id));
+      if (ids.length === 0) {
+        return res
+          .status(400)
+          .json({ message: "Invalid option ID(s) provided" });
+      }
       const opts = await Option.find({ where: { id: In(ids) } });
       answer.selectedOptions = opts;
       answer.writtenAnswer = null;
@@ -840,15 +840,21 @@ export const autoSaveAnswers = async (
         ans.selectedOptionId ||
         (ans.selectedOptionIds && ans.selectedOptionIds.length > 0)
       ) {
-        const ids = ans.selectedOptionIds || [ans.selectedOptionId];
-        const opts = await Option.find({
-          where: { id: In(ids) },
-        });
-        saveRow.selectedOptions = opts;
-        saveRow.writtenAnswer = null;
-      }
-
-      if (ans.writtenAnswer !== undefined) {
+        const rawIds: string[] = ans.selectedOptionIds || [
+          ans.selectedOptionId,
+        ];
+        const UUID_REGEX =
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        const ids = rawIds.filter((id) => UUID_REGEX.test(id));
+        if (ids.length > 0) {
+          const opts = await Option.find({
+            where: { id: In(ids) },
+          });
+          saveRow.selectedOptions = opts;
+          saveRow.writtenAnswer = null;
+        }
+      } else if (ans.writtenAnswer) {
+        // Only set writtenAnswer (and clear options) when there IS an actual text answer
         saveRow.writtenAnswer = ans.writtenAnswer;
         saveRow.selectedOptions = [];
       }
@@ -1031,7 +1037,7 @@ export const submitExam = async (
       await axios.post(
         `${process.env.VOICE_ML_URL || "http://127.0.0.1:8002"}/voice/stop-monitoring`,
         { attemptId },
-        { timeout: 3000 },
+        { timeout: 180000 },
       );
       console.log(`[VOICE] Stopped monitoring for attempt: ${attemptId}`);
     } catch (err) {

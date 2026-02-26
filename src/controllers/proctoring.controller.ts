@@ -88,10 +88,16 @@ export const checkFrame = async (
     console.log(`[FACE-HTTP] Forwarding to ML Worker at ${fastApiUrl}`);
 
     const fastRes = await axios
-      .post(fastApiUrl, { image: frame }, { timeout: 5000 })
+      .post(fastApiUrl, { image: frame }, { timeout: 30000 })
       .catch((error) => {
         console.error(`[FACE-HTTP] ML Worker error:`, error.message);
-        throw new AppError("Face ML Worker unavailable", 503);
+        if (error.code === 'ECONNABORTED') {
+          throw new AppError("Face ML Worker timeout - processing took too long", 504);
+        } else if (error.code === 'ECONNREFUSED') {
+          throw new AppError("Face ML Worker not running - please start the ML worker service", 503);
+        } else {
+          throw new AppError(`Face ML Worker error: ${error.message}`, 503);
+        }
       });
 
     const { fraud_severity, faces, objects, direction } = fastRes.data as any;
@@ -241,7 +247,7 @@ export const terminateAttempt = async (
       await axios.post(
         `${process.env.VOICE_ML_URL || "http://127.0.0.1:8002"}/voice/stop-monitoring`,
         { attemptId },
-        { timeout: 3000 },
+        { timeout: 180000 },
       );
     } catch (err) {
       console.error("[VOICE] Failed to stop monitoring:", err);

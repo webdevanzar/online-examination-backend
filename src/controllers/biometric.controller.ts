@@ -36,7 +36,7 @@ export const enrollFaceForExam = async (
     const enrollResponse = await axios.post(
       `${FACE_ML_URL}/enroll-face`,
       { user_id: userId, video_url: student.selfieVideo },
-      { timeout: 30000 }
+      { timeout: 180000 }
     );
 
     if (!enrollResponse.data.success) {
@@ -75,7 +75,7 @@ export const enrollKeystrokeForUser = async (
     const enrollResponse = await axios.post(
       `${KEYSTROKE_ML_URL}/enroll`,
       { user_id: userId, keystrokes },
-      { timeout: 15000 }
+      { timeout: 180000 }
     );
 
     if (!enrollResponse.data?.success) {
@@ -127,7 +127,7 @@ export const verifyKeystrokeForUser = async (
       verifyResponse = await axios.post(
         `${KEYSTROKE_ML_URL}/verify`,
         { user_id: userId, keystrokes },
-        { timeout: 8000 }
+        { timeout:180000}
       );
     } catch (mlError: any) {
       // Handle ML worker errors gracefully
@@ -237,7 +237,7 @@ export const verifyFaceForEnrollment = async (
     const verifyResponse = await axios.post(
       `${FACE_ML_URL}/verify-face`,
       { user_id: userId, image: frame },
-      { timeout: 5000 }
+      { timeout: 180000 }
     );
 
     const { verified, confidence, message } = verifyResponse.data;
@@ -338,7 +338,7 @@ export const verifyWithVideo = async (
         video_url: student.selfieVideo,
         image: frame,
       },
-      { timeout: 60000 } // Longer timeout since it processes video + frame
+      { timeout: 180000 } // Longer timeout since it processes video + frame
     );
 
     const { verified, confidence, message, distance, threshold, video_samples } =
@@ -394,7 +394,7 @@ export const verifyFaceForExam = async (
         video_url: student.selfieVideo,
         image: frame,
       },
-      { timeout: 60000 }
+      { timeout: 180000 }
     );
 
     const { verified, confidence, message, distance, threshold, video_samples } =
