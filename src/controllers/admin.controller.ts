@@ -142,6 +142,11 @@ export const adminGoogleAuth = async (
       throw new AppError("Google account has no email", 400);
     }
 
+    const isCountReached = await Admin.count();
+    if (isCountReached >= 3) {
+      throw new AppError("Admin limit reached", 409);
+    }
+
     //  Find admin by email
     let admin = await Admin.findOne({ where: { email } });
 
@@ -252,6 +257,11 @@ export const adminRegister = async (
     const isExisting = await Admin.findOneBy({ email });
     if (isExisting) {
       throw new AppError("Email already in use", 409);
+    }
+
+    const isCountReached = await Admin.count();
+    if (isCountReached >= 3) {
+      throw new AppError("Admin limit reached", 409);
     }
 
     //upload profile image
@@ -517,6 +527,10 @@ export const updateExam = async (
       throw new AppError("Exam not found", 404);
     }
 
+    if (exam.isPublished) {
+      throw new AppError("Cannot update exam after it has been published", 400);
+    }
+
     if (exam.createdBy.id !== req.user.id) {
       throw new AppError("You cannot modify this exam", 403);
     }
@@ -632,6 +646,10 @@ export const deleteExam = async (
       throw new AppError("Exam not found", 404);
     }
 
+    if (exam.isPublished) {
+      throw new AppError("Cannot delete exam after it has been published", 400);
+    }
+
     if (exam.createdBy?.id !== req.user?.id) {
       throw new AppError("You are not allowed to delete this exam", 403);
     }
@@ -666,6 +684,10 @@ export const createQuestion = async (
       relations: ["createdBy", "questions"],
     });
     if (!exam) throw new AppError("Exam not found", 404);
+
+    if (exam.isPublished) {
+      throw new AppError("Cannot add question to published exam", 400);
+    }
 
     if (exam.createdBy.id !== req.user.id) {
       throw new AppError("You cannot modify this exam", 403);
@@ -748,6 +770,10 @@ export const updateQuestion = async (
 
     if (!question) throw new AppError("Question not found", 404);
 
+    if (question.exam.isPublished) {
+      throw new AppError("Cannot update question in published exam", 400);
+    }
+
     // If marks are being updated, validate against exam total marks
     if (data.marks !== undefined && data.marks !== question.marks) {
       const exam = question.exam;
@@ -823,6 +849,10 @@ export const deleteQuestion = async (
     const question = await Question.findOne({ where: { id: questionId } });
 
     if (!question) throw new AppError("Question not found", 404);
+
+    if (question.exam.isPublished) {
+      throw new AppError("Cannot delete question from published exam", 400);
+    }
 
     await question.remove();
 

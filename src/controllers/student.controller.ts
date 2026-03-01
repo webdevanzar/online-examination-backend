@@ -46,6 +46,10 @@ export const studentLogin = async (
       throw new AppError("Invalid credentials", 400);
     }
 
+    if (!student.isActive) {
+      throw new AppError("Your account is inactive. Please contact admin.", 403);
+    }
+
     if (student.provider === "google") {
       throw new AppError(
         "This email is registered with google. Please use google login.",
@@ -146,6 +150,7 @@ export const studentGoogleAuth = async (
     //  Find admin by email
     let student = await Student.findOne({ where: { email } });
 
+
     // Existing LOCAL account → block Google login
     if (student && student.provider === "local") {
       throw new AppError(
@@ -166,6 +171,8 @@ export const studentGoogleAuth = async (
 
       await student.save();
     }
+
+
 
     // Generate tokens
     const tokenPayload = {
