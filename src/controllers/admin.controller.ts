@@ -31,6 +31,7 @@ import { NotificationProfile } from "../entity/NotificationProfile.entity";
 import { CheatEvent } from "../entity/CheatEvent.entity";
 import { Student } from "../entity/Student.entity";
 import axios from "axios";
+import { sendNewExamNotification } from "../lib/email";
 const GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v3/userinfo";
 
 export const adminLogin = async (
@@ -595,24 +596,24 @@ export const updateExam = async (
     await exam.save();
 
     // If exam just got published, notify all students
-    if (!wasPublished && exam.isPublished === true) {
-      const notification = Notification.create({
-        type: NotificationType.EXAM_SCHEDULED,
-        message: `New exam published: ${exam.title}`,
-        targetId: exam.id,
+    if (!wasPublished && exam.isPublished) {
+      // Fetch all student emails
+      const students = await Student.find({
+        select: ["email"],
       });
-      await notification.save();
 
-      const students = await Student.find({ select: ["id"] });
-      if (students.length > 0) {
-        const profiles = students.map((s) =>
-          NotificationProfile.create({
-            notification,
-            student: { id: s.id } as any,
-          }),
-        );
-        await NotificationProfile.save(profiles);
+      const emails = students.map(({ email }) => email).filter(Boolean); // remove null/undefined emails
+
+      if (!emails.length) {
+        console.log("⚠️ No student emails found");
+        return;
       }
+
+      await sendNewExamNotification(emails);
+
+      console.log(
+        `📤 Exam notification email sent to ${emails.length} students`,
+      );
     }
 
     res.json({
